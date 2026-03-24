@@ -1,1 +1,23 @@
-
+body{font-family:Arial,sans-serif;background:#f5f6f8;margin:0;color:#1f2937}
+.container{max-width:1100px;margin:0 auto;padding:24px}
+.hero,.card{background:#fff;border-radius:14px;padding:20px;margin-bottom:18px;box-shadow:0 2px 10px rgba(0,0,0,.06)}
+.hero{display:flex;justify-content:space-between;gap:20px;align-items:flex-start}
+.eyebrow{font-size:12px;text-transform:uppercase;color:#6b7280;margin:0 0 8px}
+.subtitle{color:#4b5563;max-width:760px}
+.status-card{min-width:180px;background:#f3f4f6;border-radius:12px;padding:14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px}
+label span{display:block;font-size:13px;margin-bottom:6px;color:#374151}
+input{width:100%;padding:10px;border:1px solid #d1d5db;border-radius:10px}
+.actions{display:flex;gap:10px;align-items:center;margin-top:16px;flex-wrap:wrap}
+button{padding:10px 16px;border:0;border-radius:10px;background:#111827;color:#fff;cursor:pointer}
+button.secondary{background:#4b5563}
+.hint{font-size:13px;color:#6b7280}
+.results{display:grid;gap:14px}
+.listing{border:1px solid #e5e7eb;border-radius:12px;padding:16px}
+.listing-top{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
+.badge{background:#065f46;color:#fff;border-radius:999px;padding:4px 10px;font-size:12px}
+.meta{display:flex;gap:14px;flex-wrap:wrap;margin:12px 0;color:#374151}
+.listing-actions a{text-decoration:none;color:#111827;font-weight:700}
+.dealers{display:grid;gap:10px}
+.dealer-row{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:10px;padding:10px 0;border-bottom:1px solid #e5e7eb}
+.empty{color:#6b7280}
