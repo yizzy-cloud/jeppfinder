@@ -7,6 +7,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urljoin
 
 import requests
 from bs4 import BeautifulSoup
@@ -18,17 +19,17 @@ load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = Path(os.getenv('DB_PATH', str(BASE_DIR / 'data' / 'renegade_finder.db')))
 PORT = int(os.getenv('PORT', '5000'))
+REQUEST_TIMEOUT = int(os.getenv('REQUEST_TIMEOUT', '25'))
+NEW_WINDOW_HOURS = int(os.getenv('NEW_WINDOW_HOURS', '72'))
+SCAN_TOKEN = os.getenv('SCAN_TOKEN', '').strip()
+AUTOFORCE_TOKEN = os.getenv('AUTOFORCE_TOKEN', '').strip()
+AUTOFORCE_API = 'https://api.autodromo.app/v1/used_models'
 
 HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
     'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
     'Accept': 'text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8',
 }
-
-AUTOFORCE_API = 'https://api.autodromo.app/v1/used_models'
-AUTOFORCE_TOKEN = os.getenv('AUTOFORCE_TOKEN', '').strip()
-NEW_WINDOW_HOURS = int(os.getenv('NEW_WINDOW_HOURS', '72'))
-SCAN_TOKEN = os.getenv('SCAN_TOKEN', '').strip()
 
 DEFAULT_FILTERS = {
     'min_price': int(os.getenv('DEFAULT_MIN_PRICE', '90000')),
@@ -36,6 +37,7 @@ DEFAULT_FILTERS = {
     'years': [int(x.strip()) for x in os.getenv('DEFAULT_YEARS', '2023,2024,2025').split(',') if x.strip()],
     'version_keywords': [x.strip().lower() for x in os.getenv('DEFAULT_VERSION_KEYWORDS', 'longitude,1.3 turbo').split(',') if x.strip()],
     'only_new': False,
+    'strict_keywords': False,
 }
 
 DEALERS = [
@@ -78,6 +80,9 @@ class Listing:
     color: str
     url: str
     source: str
+    relevance_score: int = 0
+    reason_tags: str = ''
+    notes: str = ''
     first_seen_at: str | None = None
     last_seen_at: str | None = None
     is_new: bool = False
@@ -114,11 +119,22 @@ def init_db() -> None:
             color TEXT,
             url TEXT,
             source TEXT,
+            relevance_score INTEGER DEFAULT 0,
+            reason_tags TEXT,
+            notes TEXT,
             first_seen_at TEXT NOT NULL,
             last_seen_at TEXT NOT NULL
         )
         '''
     )
+    cols = {row['name'] for row in conn.execute("PRAGMA table_info(listings)").fetchall()}
+    for col_def in [
+        ('relevance_score', 'INTEGER DEFAULT 0'),
+        ('reason_tags', 'TEXT'),
+        ('notes', 'TEXT'),
+    ]:
+        if col_def[0] not in cols:
+            conn.execute(f'ALTER TABLE listings ADD COLUMN {col_def[0]} {col_def[1]}')
     conn.execute(
         '''
         CREATE TABLE IF NOT EXISTS scan_runs (
@@ -132,6 +148,15 @@ def init_db() -> None:
     )
     conn.commit()
     conn.close()
+
+
+def safe_request(url: str) -> requests.Response | None:
+    try:
+        response = requests.get(url, headers=HEADERS, timeout=REQUEST_TIMEOUT)
+        response.raise_for_status()
+        return response
+    except Exception:
+        return None
 
 
 def parse_price(value: str | int | float | None) -> float:
@@ -151,7 +176,7 @@ def parse_price(value: str | int | float | None) -> float:
 
 
 def format_price(value: float) -> str:
-    return f'R$ {value:,.2f}'.replace(',', 'X').replace('.', ',').replace('X', '.')
+    return f'R$ {value:,.2f}'.replace(',', 'X').replace('.', ',').replace('X', '.') if value else 'Sob consulta'
 
 
 def normalize_spaces(value: str) -> str:
@@ -159,7 +184,21 @@ def normalize_spaces(value: str) -> str:
 
 
 def extract_years(value: str) -> list[int]:
-    return [int(x) for x in re.findall(r'20\d{2}', value or '')]
+    years = [int(x) for x in re.findall(r'20\d{2}', value or '')]
+    unique = []
+    for year in years:
+        if year not in unique:
+            unique.append(year)
+    return unique
+
+
+def extract_km(value: str) -> str:
+    match = re.search(r'(\d{1,3}(?:[\.\s]\d{3})+|\d{1,6})\s?km', value or '', re.I)
+    return normalize_spaces(match.group(0)) if match else 'N/I'
+
+
+def absolute_url(base_url: str, href: str) -> str:
+    return urljoin(base_url, href)
 
 
 def build_fingerprint(item: dict[str, Any]) -> str:
@@ -179,9 +218,74 @@ def looks_like_target_model(text: str) -> bool:
     return 'renegade' in (text or '').lower()
 
 
-def matches_version(text: str, version_keywords: list[str]) -> bool:
-    t = (text or '').lower()
-    return all(k in t for k in version_keywords)
+def keyword_hits(text: str, version_keywords: list[str]) -> list[str]:
+    haystack = (text or '').lower()
+    return [k for k in version_keywords if k and k in haystack]
+
+
+def score_listing(listing: Listing, filters: dict[str, Any]) -> tuple[int, list[str]]:
+    score = 0
+    tags: list[str] = []
+    full_text = f'{listing.model} {listing.version} {listing.notes}'.lower()
+    years = extract_years(listing.year)
+    hits = keyword_hits(full_text, filters['version_keywords'])
+
+    if looks_like_target_model(full_text):
+        score += 50
+        tags.append('renegade')
+    if 'longitude' in full_text:
+        score += 25
+        tags.append('longitude')
+    if '1.3 turbo' in full_text or 't270' in full_text:
+        score += 20
+        tags.append('1.3 turbo')
+    elif 'turbo' in full_text:
+        score += 10
+        tags.append('turbo')
+    if years and any(y in filters['years'] for y in years):
+        score += 20
+        tags.append('ano_ok')
+    if listing.price and filters['min_price'] <= listing.price <= filters['max_price']:
+        score += 20
+        tags.append('preco_ok')
+    if hits:
+        score += len(hits) * 5
+        tags.extend([f'kw:{x}' for x in hits])
+    if listing.url and listing.url != listing.dealer_url:
+        score += 5
+        tags.append('link_detalhe')
+    return score, tags
+
+
+def matches_filters(listing: Listing, filters: dict[str, Any]) -> bool:
+    full_text = f'{listing.model} {listing.version} {listing.notes}'.lower()
+    years = extract_years(listing.year)
+    hits = keyword_hits(full_text, filters['version_keywords'])
+
+    if not looks_like_target_model(full_text):
+        return False
+    if filters['years'] and years and not any(y in filters['years'] for y in years):
+        return False
+    if listing.price and listing.price < filters['min_price']:
+        return False
+    if listing.price and listing.price > filters['max_price']:
+        return False
+    if filters.get('strict_keywords'):
+        return all(k in full_text for k in filters['version_keywords']) if filters['version_keywords'] else True
+    if filters['version_keywords']:
+        return bool(hits)
+    return True
+
+
+def row_to_listing(row: sqlite3.Row) -> dict[str, Any]:
+    data = dict(row)
+    try:
+        first_seen = datetime.fromisoformat(data['first_seen_at'])
+    except Exception:
+        first_seen = None
+    data['is_new'] = bool(first_seen and first_seen >= datetime.now(timezone.utc) - timedelta(hours=NEW_WINDOW_HOURS))
+    data['reason_tags'] = [x for x in (data.get('reason_tags') or '').split(',') if x]
+    return data
 
 
 def upsert_listing(listing: Listing) -> Listing:
@@ -199,13 +303,15 @@ def upsert_listing(listing: Listing) -> Listing:
             '''
             UPDATE listings
             SET dealer=?, dealer_url=?, city=?, platform=?, model=?, version=?, year=?,
-                price=?, price_label=?, km=?, color=?, url=?, source=?, last_seen_at=?
+                price=?, price_label=?, km=?, color=?, url=?, source=?, relevance_score=?,
+                reason_tags=?, notes=?, last_seen_at=?
             WHERE fingerprint=?
             ''',
             (
                 listing.dealer, listing.dealer_url, listing.city, listing.platform, listing.model,
                 listing.version, listing.year, listing.price, listing.price_label, listing.km,
-                listing.color, listing.url, listing.source, listing.last_seen_at, fp,
+                listing.color, listing.url, listing.source, listing.relevance_score,
+                listing.reason_tags, listing.notes, listing.last_seen_at, fp,
             ),
         )
     else:
@@ -216,13 +322,15 @@ def upsert_listing(listing: Listing) -> Listing:
             '''
             INSERT INTO listings (
                 fingerprint, dealer, dealer_url, city, platform, model, version, year, price,
-                price_label, km, color, url, source, first_seen_at, last_seen_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                price_label, km, color, url, source, relevance_score, reason_tags, notes,
+                first_seen_at, last_seen_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''',
             (
                 fp, listing.dealer, listing.dealer_url, listing.city, listing.platform, listing.model,
                 listing.version, listing.year, listing.price, listing.price_label, listing.km,
-                listing.color, listing.url, listing.source, listing.first_seen_at, listing.last_seen_at,
+                listing.color, listing.url, listing.source, listing.relevance_score,
+                listing.reason_tags, listing.notes, listing.first_seen_at, listing.last_seen_at,
             ),
         )
     conn.commit()
@@ -240,16 +348,6 @@ def record_scan_run(total_raw: int, total_filtered: int, notes: str = '') -> Non
     conn.close()
 
 
-def row_to_listing(row: sqlite3.Row) -> dict[str, Any]:
-    data = dict(row)
-    try:
-        first_seen = datetime.fromisoformat(data['first_seen_at'])
-    except Exception:
-        first_seen = None
-    data['is_new'] = bool(first_seen and first_seen >= datetime.now(timezone.utc) - timedelta(hours=NEW_WINDOW_HOURS))
-    return data
-
-
 def fetch_autoforce(dealer: dict[str, Any]) -> list[Listing]:
     if not AUTOFORCE_TOKEN:
         return []
@@ -258,7 +356,7 @@ def fetch_autoforce(dealer: dict[str, Any]) -> list[Listing]:
             AUTOFORCE_API,
             params={'page': 1, 'per_page': 200, 'channel_id': dealer['channel']},
             headers={**HEADERS, 'Authorization': f'Token {AUTOFORCE_TOKEN}'},
-            timeout=25,
+            timeout=REQUEST_TIMEOUT,
         )
         response.raise_for_status()
         payload = response.json()
@@ -266,6 +364,7 @@ def fetch_autoforce(dealer: dict[str, Any]) -> list[Listing]:
         return []
 
     items: list[Listing] = []
+    base_domain = dealer['url'].split('/seminovos')[0]
     for entry in payload.get('entries', []):
         model = normalize_spaces(entry.get('name') or entry.get('model') or '')
         brand = normalize_spaces(entry.get('brand') or '')
@@ -274,61 +373,110 @@ def fetch_autoforce(dealer: dict[str, Any]) -> list[Listing]:
             continue
         version = normalize_spaces(entry.get('version') or model)
         price = parse_price(entry.get('price_value') or entry.get('price'))
-        year = f"{entry.get('fabrication_year', '')}/{entry.get('model_year', '')}".strip('/')
+        fabrication_year = str(entry.get('fabrication_year') or '').strip()
+        model_year = str(entry.get('model_year') or '').strip()
+        year = '/'.join([x for x in [fabrication_year, model_year] if x]) or 'N/I'
         km = str(entry.get('km') or 'N/I')
         color = normalize_spaces(entry.get('color') or 'N/I')
         slug = normalize_spaces(entry.get('slug') or '')
-        base_domain = dealer['url'].split('/seminovos')[0]
         url = f'{base_domain}/seminovos/{slug}' if slug else dealer['url']
-        if entry.get('sold'):
-            continue
+        notes = normalize_spaces(' '.join([
+            str(entry.get('fuel') or ''),
+            str(entry.get('transmission') or ''),
+            str(entry.get('description') or ''),
+        ]))
         items.append(Listing(
             dealer=dealer['name'], dealer_url=dealer['url'], city=dealer['city'], platform=dealer['platform'],
             model=full_model, version=version, year=year, price=price, price_label=format_price(price),
-            km=km, color=color, url=url, source='autoforce'))
+            km=km, color=color, url=url, source='autoforce', notes=notes,
+        ))
     return items
 
 
+def pick_anchor_context(anchor) -> str:
+    blocks = [anchor.get_text(' ', strip=True)]
+    parent = anchor.parent
+    if parent:
+        blocks.append(parent.get_text(' ', strip=True))
+        grandparent = parent.parent
+        if grandparent:
+            blocks.append(grandparent.get_text(' ', strip=True))
+    return normalize_spaces(' '.join(blocks))
+
+
+def infer_version(text: str) -> str:
+    lower = (text or '').lower()
+    pieces = []
+    if 'longitude' in lower:
+        pieces.append('Longitude')
+    if 't270' in lower:
+        pieces.append('T270')
+    if '1.3 turbo' in lower:
+        pieces.append('1.3 Turbo')
+    elif 'turbo' in lower:
+        pieces.append('Turbo')
+    return ' '.join(pieces) or 'Renegade'
+
+
+def fetch_detail_page(detail_url: str) -> dict[str, str]:
+    response = safe_request(detail_url)
+    if not response:
+        return {}
+    html = response.text
+    soup = BeautifulSoup(html, 'html.parser')
+    full_text = normalize_spaces(soup.get_text(' ', strip=True))
+    title = normalize_spaces((soup.title.string if soup.title and soup.title.string else ''))
+    price_match = re.search(r'R\$\s?[\d\.,]+', full_text, re.I)
+    price_label = normalize_spaces(price_match.group(0)) if price_match else ''
+    return {
+        'title': title,
+        'full_text': full_text,
+        'price_label': price_label,
+        'km': extract_km(full_text),
+        'version': infer_version(full_text),
+        'year': '/'.join(str(y) for y in extract_years(full_text)[:2]) or 'N/I',
+    }
+
+
 def fetch_html_fallback(dealer: dict[str, Any]) -> list[Listing]:
-    try:
-        response = requests.get(dealer['url'], headers=HEADERS, timeout=25)
-        response.raise_for_status()
-    except Exception:
+    response = safe_request(dealer['url'])
+    if not response:
         return []
 
     soup = BeautifulSoup(response.text, 'html.parser')
-    text = soup.get_text(' ', strip=True)
-    if 'renegade' not in text.lower():
-        return []
-
     results: list[Listing] = []
-    candidates = soup.select('a[href]')
     seen_urls: set[str] = set()
 
-    for anchor in candidates:
+    for anchor in soup.select('a[href]'):
         href = normalize_spaces(anchor.get('href') or '')
-        label = normalize_spaces(anchor.get_text(' ', strip=True))
-        combined = f'{label} {href}'.lower()
-        if 'renegade' not in combined:
+        if not href or href.startswith('javascript:'):
             continue
-        full_url = requests.compat.urljoin(dealer['url'], href)
+        full_url = absolute_url(dealer['url'], href)
         if full_url in seen_urls:
             continue
+        context = pick_anchor_context(anchor)
+        combined = f'{href} {context}'.lower()
+        if 'renegade' not in combined:
+            continue
         seen_urls.add(full_url)
-        context = normalize_spaces(anchor.parent.get_text(' ', strip=True))
-        merged = f'{label} {context}'
+
+        detail = fetch_detail_page(full_url) if full_url != dealer['url'] else {}
+        merged = normalize_spaces(' '.join([context, detail.get('title', ''), detail.get('full_text', '')]))
+        if 'renegade' not in merged.lower():
+            merged = context
         years = extract_years(merged)
         year_label = '/'.join(str(y) for y in years[:2]) if years else 'N/I'
         price_match = re.search(r'R\$\s?[\d\.,]+', merged, re.I)
-        price = parse_price(price_match.group(0)) if price_match else 0.0
-        km_match = re.search(r'(\d{1,3}(?:\.\d{3})+|\d{1,6})\s?km', merged, re.I)
-        km = km_match.group(0) if km_match else 'N/I'
-        version = 'Longitude 1.3 Turbo' if 'longitude' in merged.lower() else 'Renegade'
+        price = parse_price(price_match.group(0)) if price_match else parse_price(detail.get('price_label'))
+        km = extract_km(merged)
+        version = infer_version(merged)
+        notes = normalize_spaces(merged[:500])
         results.append(Listing(
             dealer=dealer['name'], dealer_url=dealer['url'], city=dealer['city'], platform=dealer['platform'],
-            model='Jeep Renegade', version=version, year=year_label, price=price,
-            price_label=format_price(price) if price else 'Sob consulta', km=km, color='N/I',
-            url=full_url, source='html-fallback'))
+            model='Jeep Renegade', version=detail.get('version') or version, year=detail.get('year') or year_label,
+            price=price, price_label=format_price(price), km=detail.get('km') or km, color='N/I',
+            url=full_url, source='html-fallback', notes=notes,
+        ))
     return results
 
 
@@ -346,7 +494,19 @@ def normalize_filters(payload: dict[str, Any] | None) -> dict[str, Any]:
         'years': years,
         'version_keywords': version_keywords,
         'only_new': bool(payload.get('only_new', DEFAULT_FILTERS['only_new'])),
+        'strict_keywords': bool(payload.get('strict_keywords', DEFAULT_FILTERS['strict_keywords'])),
     }
+
+
+def dedupe_listings(items: list[Listing]) -> list[Listing]:
+    best_by_fp: dict[str, Listing] = {}
+    for item in items:
+        fp = build_fingerprint(asdict(item))
+        item.fingerprint = fp
+        current = best_by_fp.get(fp)
+        if current is None or len(item.notes) > len(current.notes) or item.url != item.dealer_url:
+            best_by_fp[fp] = item
+    return list(best_by_fp.values())
 
 
 def run_scan(filters: dict[str, Any]) -> dict[str, Any]:
@@ -355,43 +515,57 @@ def run_scan(filters: dict[str, Any]) -> dict[str, Any]:
 
     for dealer in DEALERS:
         items = fetch_autoforce(dealer) if dealer['platform'] == 'autoforce' else fetch_html_fallback(dealer)
+        if dealer['platform'] == 'autoforce' and not items:
+            # fallback leve sem token, ao menos para tentar achar links públicos
+            html_attempt = fetch_html_fallback(dealer)
+            if html_attempt:
+                items = html_attempt
+        for item in items:
+            score, tags = score_listing(item, filters)
+            item.relevance_score = score
+            item.reason_tags = ','.join(tags)
         raw_items.extend(items)
         dealer_stats.append({
             'dealer': dealer['name'],
             'city': dealer['city'],
             'platform': dealer['platform'],
             'found_raw': len(items),
+            'dealer_url': dealer['url'],
         })
 
+    raw_items = dedupe_listings(raw_items)
     filtered: list[dict[str, Any]] = []
+    candidates: list[dict[str, Any]] = []
+
     for item in raw_items:
-        full_text = f'{item.model} {item.version}'.lower()
-        years = extract_years(item.year)
-        if not looks_like_target_model(full_text):
-            continue
-        if filters['version_keywords'] and not matches_version(full_text, filters['version_keywords']):
-            continue
-        if item.price and item.price < filters['min_price']:
-            continue
-        if item.price and item.price > filters['max_price']:
-            continue
-        if filters['years'] and years and not any(y in filters['years'] for y in years):
-            continue
         stored = upsert_listing(item)
         row = asdict(stored)
-        if filters.get('only_new') and not row.get('is_new'):
-            continue
-        filtered.append(row)
+        row['reason_tags'] = [x for x in item.reason_tags.split(',') if x]
+        row['relevance_score'] = item.relevance_score
+        if matches_filters(item, filters):
+            if filters.get('only_new') and not row.get('is_new'):
+                continue
+            filtered.append(row)
+        else:
+            candidates.append(row)
 
-    filtered.sort(key=lambda x: (not x.get('is_new', False), float(x.get('price', 999999999)), x.get('dealer', '')))
+    filtered.sort(key=lambda x: (not x.get('is_new', False), -int(x.get('relevance_score', 0)), float(x.get('price', 999999999)), x.get('dealer', '')))
+    candidates.sort(key=lambda x: (-int(x.get('relevance_score', 0)), float(x.get('price', 999999999)), x.get('dealer', '')))
+
     record_scan_run(len(raw_items), len(filtered), notes=json.dumps(filters, ensure_ascii=False))
     return {
         'executed_at': now_iso(),
         'filters': filters,
         'total_raw': len(raw_items),
         'total_filtered': len(filtered),
-        'dealer_stats': dealer_stats,
+        'total_candidates': len(candidates),
+        'dealer_stats': sorted(dealer_stats, key=lambda x: (-x['found_raw'], x['dealer'])),
         'results': filtered,
+        'candidates': candidates[:50],
+        'messages': [
+            'Se o resultado filtrado vier zerado, veja abaixo os candidatos próximos do filtro.',
+            'Anúncios marcados como NOVO são os que surgiram dentro da janela configurada.',
+        ],
     }
 
 
@@ -424,7 +598,7 @@ def api_scan_secret():
 def api_listings():
     only_new = request.args.get('only_new', 'false').lower() == 'true'
     conn = get_db()
-    rows = conn.execute('SELECT * FROM listings ORDER BY last_seen_at DESC, price ASC').fetchall()
+    rows = conn.execute('SELECT * FROM listings ORDER BY last_seen_at DESC, relevance_score DESC, price ASC').fetchall()
     conn.close()
     items = [row_to_listing(row) for row in rows]
     if only_new:
