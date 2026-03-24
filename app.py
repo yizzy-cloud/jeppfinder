@@ -3,6 +3,7 @@ import json
 import os
 import re
 import sqlite3
+import traceback
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -91,6 +92,24 @@ class Listing:
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def safe_int(value: Any, default: int) -> int:
+    try:
+        if value in (None, ''):
+            return default
+        return int(value)
+    except Exception:
+        return default
+
+
+def safe_float_sort(value: Any, default: float = 999999999.0) -> float:
+    try:
+        if value in (None, '', 'N/I'):
+            return default
+        return float(value)
+    except Exception:
+        return default
 
 
 def get_db() -> sqlite3.Connection:
@@ -366,30 +385,33 @@ def fetch_autoforce(dealer: dict[str, Any]) -> list[Listing]:
     items: list[Listing] = []
     base_domain = dealer['url'].split('/seminovos')[0]
     for entry in payload.get('entries', []):
-        model = normalize_spaces(entry.get('name') or entry.get('model') or '')
-        brand = normalize_spaces(entry.get('brand') or '')
-        full_model = normalize_spaces(f'{brand} {model}')
-        if not looks_like_target_model(full_model):
+        try:
+            model = normalize_spaces(entry.get('name') or entry.get('model') or '')
+            brand = normalize_spaces(entry.get('brand') or '')
+            full_model = normalize_spaces(f'{brand} {model}')
+            if not looks_like_target_model(full_model):
+                continue
+            version = normalize_spaces(entry.get('version') or model)
+            price = parse_price(entry.get('price_value') or entry.get('price'))
+            fabrication_year = str(entry.get('fabrication_year') or '').strip()
+            model_year = str(entry.get('model_year') or '').strip()
+            year = '/'.join([x for x in [fabrication_year, model_year] if x]) or 'N/I'
+            km = str(entry.get('km') or 'N/I')
+            color = normalize_spaces(entry.get('color') or 'N/I')
+            slug = normalize_spaces(entry.get('slug') or '')
+            url = f'{base_domain}/seminovos/{slug}' if slug else dealer['url']
+            notes = normalize_spaces(' '.join([
+                str(entry.get('fuel') or ''),
+                str(entry.get('transmission') or ''),
+                str(entry.get('description') or ''),
+            ]))
+            items.append(Listing(
+                dealer=dealer['name'], dealer_url=dealer['url'], city=dealer['city'], platform=dealer['platform'],
+                model=full_model, version=version, year=year, price=price, price_label=format_price(price),
+                km=km, color=color, url=url, source='autoforce', notes=notes,
+            ))
+        except Exception:
             continue
-        version = normalize_spaces(entry.get('version') or model)
-        price = parse_price(entry.get('price_value') or entry.get('price'))
-        fabrication_year = str(entry.get('fabrication_year') or '').strip()
-        model_year = str(entry.get('model_year') or '').strip()
-        year = '/'.join([x for x in [fabrication_year, model_year] if x]) or 'N/I'
-        km = str(entry.get('km') or 'N/I')
-        color = normalize_spaces(entry.get('color') or 'N/I')
-        slug = normalize_spaces(entry.get('slug') or '')
-        url = f'{base_domain}/seminovos/{slug}' if slug else dealer['url']
-        notes = normalize_spaces(' '.join([
-            str(entry.get('fuel') or ''),
-            str(entry.get('transmission') or ''),
-            str(entry.get('description') or ''),
-        ]))
-        items.append(Listing(
-            dealer=dealer['name'], dealer_url=dealer['url'], city=dealer['city'], platform=dealer['platform'],
-            model=full_model, version=version, year=year, price=price, price_label=format_price(price),
-            km=km, color=color, url=url, source='autoforce', notes=notes,
-        ))
     return items
 
 
@@ -448,35 +470,40 @@ def fetch_html_fallback(dealer: dict[str, Any]) -> list[Listing]:
     seen_urls: set[str] = set()
 
     for anchor in soup.select('a[href]'):
-        href = normalize_spaces(anchor.get('href') or '')
-        if not href or href.startswith('javascript:'):
-            continue
-        full_url = absolute_url(dealer['url'], href)
-        if full_url in seen_urls:
-            continue
-        context = pick_anchor_context(anchor)
-        combined = f'{href} {context}'.lower()
-        if 'renegade' not in combined:
-            continue
-        seen_urls.add(full_url)
+        try:
+            href = normalize_spaces(anchor.get('href') or '')
+            if not href or href.startswith('javascript:') or href.startswith('#'):
+                continue
+            full_url = absolute_url(dealer['url'], href)
+            if full_url in seen_urls:
+                continue
+            context = pick_anchor_context(anchor)
+            combined = f'{href} {context}'.lower()
+            if 'renegade' not in combined:
+                continue
+            seen_urls.add(full_url)
 
-        detail = fetch_detail_page(full_url) if full_url != dealer['url'] else {}
-        merged = normalize_spaces(' '.join([context, detail.get('title', ''), detail.get('full_text', '')]))
-        if 'renegade' not in merged.lower():
-            merged = context
-        years = extract_years(merged)
-        year_label = '/'.join(str(y) for y in years[:2]) if years else 'N/I'
-        price_match = re.search(r'R\$\s?[\d\.,]+', merged, re.I)
-        price = parse_price(price_match.group(0)) if price_match else parse_price(detail.get('price_label'))
-        km = extract_km(merged)
-        version = infer_version(merged)
-        notes = normalize_spaces(merged[:500])
-        results.append(Listing(
-            dealer=dealer['name'], dealer_url=dealer['url'], city=dealer['city'], platform=dealer['platform'],
-            model='Jeep Renegade', version=detail.get('version') or version, year=detail.get('year') or year_label,
-            price=price, price_label=format_price(price), km=detail.get('km') or km, color='N/I',
-            url=full_url, source='html-fallback', notes=notes,
-        ))
+            detail = fetch_detail_page(full_url) if full_url != dealer['url'] else {}
+            merged = normalize_spaces(' '.join([context, detail.get('title', ''), detail.get('full_text', '')]))
+            if 'renegade' not in merged.lower():
+                merged = context
+            years = extract_years(merged)
+            year_label = '/'.join(str(y) for y in years[:2]) if years else 'N/I'
+            price_match = re.search(r'R\$\s?[\d\.,]+', merged, re.I)
+            price = parse_price(price_match.group(0)) if price_match else parse_price(detail.get('price_label'))
+            km = extract_km(merged)
+            version = infer_version(merged)
+            notes = normalize_spaces(merged[:500])
+
+            results.append(Listing(
+                dealer=dealer['name'], dealer_url=dealer['url'], city=dealer['city'], platform=dealer['platform'],
+                model='Jeep Renegade', version=detail.get('version') or version, year=detail.get('year') or year_label,
+                price=price, price_label=format_price(price), km=detail.get('km') or km, color='N/I',
+                url=full_url, source='html-fallback', notes=notes,
+            ))
+        except Exception:
+            continue
+
     return results
 
 
@@ -484,13 +511,16 @@ def normalize_filters(payload: dict[str, Any] | None) -> dict[str, Any]:
     payload = payload or {}
     years = payload.get('years', DEFAULT_FILTERS['years'])
     if isinstance(years, str):
-        years = [int(x.strip()) for x in years.split(',') if x.strip()]
+        years = [safe_int(x.strip(), 0) for x in years.split(',') if x.strip()]
+        years = [x for x in years if x > 0]
+
     version_keywords = payload.get('version_keywords', DEFAULT_FILTERS['version_keywords'])
     if isinstance(version_keywords, str):
         version_keywords = [x.strip().lower() for x in version_keywords.split(',') if x.strip()]
+
     return {
-        'min_price': int(payload.get('min_price', DEFAULT_FILTERS['min_price'])),
-        'max_price': int(payload.get('max_price', DEFAULT_FILTERS['max_price'])),
+        'min_price': safe_int(payload.get('min_price', DEFAULT_FILTERS['min_price']), DEFAULT_FILTERS['min_price']),
+        'max_price': safe_int(payload.get('max_price', DEFAULT_FILTERS['max_price']), DEFAULT_FILTERS['max_price']),
         'years': years,
         'version_keywords': version_keywords,
         'only_new': bool(payload.get('only_new', DEFAULT_FILTERS['only_new'])),
@@ -512,45 +542,85 @@ def dedupe_listings(items: list[Listing]) -> list[Listing]:
 def run_scan(filters: dict[str, Any]) -> dict[str, Any]:
     raw_items: list[Listing] = []
     dealer_stats: list[dict[str, Any]] = []
+    messages: list[str] = []
 
     for dealer in DEALERS:
-        items = fetch_autoforce(dealer) if dealer['platform'] == 'autoforce' else fetch_html_fallback(dealer)
-        if dealer['platform'] == 'autoforce' and not items:
-            # fallback leve sem token, ao menos para tentar achar links públicos
-            html_attempt = fetch_html_fallback(dealer)
-            if html_attempt:
-                items = html_attempt
+        items: list[Listing] = []
+        dealer_error = None
+
+        try:
+            items = fetch_autoforce(dealer) if dealer['platform'] == 'autoforce' else fetch_html_fallback(dealer)
+
+            if dealer['platform'] == 'autoforce' and not items:
+                html_attempt = fetch_html_fallback(dealer)
+                if html_attempt:
+                    items = html_attempt
+                    messages.append(f'{dealer["name"]}: fallback HTML usado por ausência de retorno AutoForce.')
+        except Exception as e:
+            dealer_error = str(e)
+            traceback.print_exc()
+            items = []
+
+        safe_items: list[Listing] = []
         for item in items:
-            score, tags = score_listing(item, filters)
-            item.relevance_score = score
-            item.reason_tags = ','.join(tags)
-        raw_items.extend(items)
+            try:
+                score, tags = score_listing(item, filters)
+                item.relevance_score = score
+                item.reason_tags = ','.join(tags)
+                safe_items.append(item)
+            except Exception:
+                traceback.print_exc()
+                continue
+
+        raw_items.extend(safe_items)
         dealer_stats.append({
             'dealer': dealer['name'],
             'city': dealer['city'],
             'platform': dealer['platform'],
-            'found_raw': len(items),
+            'found_raw': len(safe_items),
             'dealer_url': dealer['url'],
+            'error': dealer_error,
         })
+
+        if dealer_error:
+            messages.append(f'{dealer["name"]}: erro na varredura ({dealer_error}).')
 
     raw_items = dedupe_listings(raw_items)
     filtered: list[dict[str, Any]] = []
     candidates: list[dict[str, Any]] = []
 
     for item in raw_items:
-        stored = upsert_listing(item)
-        row = asdict(stored)
-        row['reason_tags'] = [x for x in item.reason_tags.split(',') if x]
-        row['relevance_score'] = item.relevance_score
-        if matches_filters(item, filters):
-            if filters.get('only_new') and not row.get('is_new'):
-                continue
-            filtered.append(row)
-        else:
-            candidates.append(row)
+        try:
+            stored = upsert_listing(item)
+            row = asdict(stored)
+            row['reason_tags'] = [x for x in item.reason_tags.split(',') if x]
+            row['relevance_score'] = item.relevance_score
 
-    filtered.sort(key=lambda x: (not x.get('is_new', False), -int(x.get('relevance_score', 0)), float(x.get('price', 999999999)), x.get('dealer', '')))
-    candidates.sort(key=lambda x: (-int(x.get('relevance_score', 0)), float(x.get('price', 999999999)), x.get('dealer', '')))
+            if matches_filters(item, filters):
+                if filters.get('only_new') and not row.get('is_new'):
+                    continue
+                filtered.append(row)
+            else:
+                candidates.append(row)
+        except Exception:
+            traceback.print_exc()
+            continue
+
+    filtered.sort(
+        key=lambda x: (
+            not x.get('is_new', False),
+            -safe_int(x.get('relevance_score', 0), 0),
+            safe_float_sort(x.get('price', 999999999)),
+            x.get('dealer', '')
+        )
+    )
+    candidates.sort(
+        key=lambda x: (
+            -safe_int(x.get('relevance_score', 0), 0),
+            safe_float_sort(x.get('price', 999999999)),
+            x.get('dealer', '')
+        )
+    )
 
     record_scan_run(len(raw_items), len(filtered), notes=json.dumps(filters, ensure_ascii=False))
     return {
@@ -562,7 +632,7 @@ def run_scan(filters: dict[str, Any]) -> dict[str, Any]:
         'dealer_stats': sorted(dealer_stats, key=lambda x: (-x['found_raw'], x['dealer'])),
         'results': filtered,
         'candidates': candidates[:50],
-        'messages': [
+        'messages': messages + [
             'Se o resultado filtrado vier zerado, veja abaixo os candidatos próximos do filtro.',
             'Anúncios marcados como NOVO são os que surgiram dentro da janela configurada.',
         ],
@@ -576,34 +646,58 @@ init_db()
 
 @app.get('/')
 def index():
-    return render_template('index.html', default_filters=DEFAULT_FILTERS, dealers=DEALERS, new_window_hours=NEW_WINDOW_HOURS)
+    return render_template(
+        'index.html',
+        default_filters=DEFAULT_FILTERS,
+        dealers=DEALERS,
+        new_window_hours=NEW_WINDOW_HOURS
+    )
 
 
 @app.post('/api/scan')
 def api_scan():
-    filters = normalize_filters(request.get_json(silent=True))
-    return jsonify(run_scan(filters))
+    try:
+        filters = normalize_filters(request.get_json(silent=True))
+        return jsonify(run_scan(filters)), 200
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({
+            'error': f'Erro interno em /api/scan: {str(e)}',
+            'trace_hint': 'Verifique os logs do Render para o traceback completo.'
+        }), 500
 
 
 @app.post('/api/scan-secret')
 def api_scan_secret():
-    token = request.headers.get('X-Scan-Token', '')
-    if not SCAN_TOKEN or token != SCAN_TOKEN:
-        return jsonify({'error': 'unauthorized'}), 401
-    filters = normalize_filters(request.get_json(silent=True))
-    return jsonify(run_scan(filters))
+    try:
+        token = request.headers.get('X-Scan-Token', '')
+        if not SCAN_TOKEN or token != SCAN_TOKEN:
+            return jsonify({'error': 'unauthorized'}), 401
+
+        filters = normalize_filters(request.get_json(silent=True))
+        return jsonify(run_scan(filters)), 200
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({
+            'error': f'Erro interno em /api/scan-secret: {str(e)}',
+            'trace_hint': 'Verifique os logs do Render para o traceback completo.'
+        }), 500
 
 
 @app.get('/api/listings')
 def api_listings():
-    only_new = request.args.get('only_new', 'false').lower() == 'true'
-    conn = get_db()
-    rows = conn.execute('SELECT * FROM listings ORDER BY last_seen_at DESC, relevance_score DESC, price ASC').fetchall()
-    conn.close()
-    items = [row_to_listing(row) for row in rows]
-    if only_new:
-        items = [item for item in items if item['is_new']]
-    return jsonify({'total': len(items), 'results': items})
+    try:
+        only_new = request.args.get('only_new', 'false').lower() == 'true'
+        conn = get_db()
+        rows = conn.execute('SELECT * FROM listings ORDER BY last_seen_at DESC, relevance_score DESC, price ASC').fetchall()
+        conn.close()
+        items = [row_to_listing(row) for row in rows]
+        if only_new:
+            items = [item for item in items if item['is_new']]
+        return jsonify({'total': len(items), 'results': items}), 200
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'error': f'Erro interno em /api/listings: {str(e)}'}), 500
 
 
 @app.get('/api/health')
