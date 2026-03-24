@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: renegade-finder
+    env: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.5
+      - key: DB_PATH
+        value: /var/data/renegade_finder.db
+      - key: NEW_WINDOW_HOURS
+        value: 72
+      - key: DEFAULT_MIN_PRICE
+        value: 90000
+      - key: DEFAULT_MAX_PRICE
+        value: 113000
+      - key: DEFAULT_YEARS
+        value: 2023,2024,2025
+      - key: DEFAULT_VERSION_KEYWORDS
+        value: longitude,1.3 turbo
