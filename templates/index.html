@@ -7,21 +7,27 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-  <main class="container">
-    <header class="hero">
+  <main class="page">
+    <section class="hero card">
       <div>
-        <p class="eyebrow">Busca objetiva</p>
+        <p class="eyebrow">BUSCA OBJETIVA</p>
         <h1>Renegade Finder</h1>
         <p class="subtitle">Encontre Jeep Renegade Longitude 1.3 Turbo de concessionárias Jeep, com foco em 2023 a 2025 e faixa de R$ 90 mil a R$ 113 mil.</p>
       </div>
-      <div class="status-card">
-        <div><strong>Janela de novo anúncio</strong></div>
-        <div>{{ new_window_hours }} horas</div>
+      <div class="hero-side">
+        <div class="mini-card">
+          <strong>Janela de novo anúncio</strong>
+          <div>{{ new_window_hours }} horas</div>
+        </div>
+        <div class="mini-card neutral">
+          <strong>Modo atual</strong>
+          <div>Busca com link do anúncio e candidatos próximos</div>
+        </div>
       </div>
-    </header>
+    </section>
 
     <section class="card filters">
-      <div class="grid">
+      <div class="grid four">
         <label>
           <span>Preço mínimo</span>
           <input id="min_price" type="number" value="{{ default_filters.min_price }}">
@@ -39,27 +45,40 @@
           <input id="version_keywords" type="text" value="{{ default_filters.version_keywords | join(', ') }}">
         </label>
       </div>
+      <div class="controls-row">
+        <label class="toggle"><input id="only_new" type="checkbox"> Apenas novos</label>
+        <label class="toggle"><input id="strict_keywords" type="checkbox"> Exigir todas as palavras da versão</label>
+      </div>
       <div class="actions">
-        <label class="check"><input id="only_new" type="checkbox"> Apenas novos</label>
         <button id="scanBtn">Buscar anúncios</button>
         <button id="historyBtn" class="secondary">Ver histórico salvo</button>
       </div>
-      <p class="hint">A primeira busca cria a base. A partir da segunda, o sistema passa a marcar anúncios novos.</p>
+      <p class="hint">Quando o filtro estrito zerar os resultados, o sistema ainda mostra candidatos próximos com o link real do anúncio.</p>
     </section>
 
     <section class="card summary" id="summary" hidden>
-      <div class="summary-row">
-        <div><strong>Executado em:</strong> <span id="executed_at">-</span></div>
-        <div><strong>Brutos:</strong> <span id="total_raw">0</span></div>
-        <div><strong>Filtrados:</strong> <span id="total_filtered">0</span></div>
+      <div class="summary-grid">
+        <div><span class="label">Executado em</span><strong id="executed_at">-</strong></div>
+        <div><span class="label">Brutos</span><strong id="total_raw">0</strong></div>
+        <div><span class="label">Filtrados</span><strong id="total_filtered">0</strong></div>
+        <div><span class="label">Próximos do filtro</span><strong id="total_candidates">0</strong></div>
       </div>
+      <div id="messages" class="messages"></div>
     </section>
 
     <section class="card" id="resultsCard" hidden>
       <div class="section-title">
-        <h2>Resultados</h2>
+        <h2>Resultados dentro do filtro</h2>
       </div>
-      <div id="results" class="results"></div>
+      <div id="results" class="listing-grid"></div>
+    </section>
+
+    <section class="card" id="candidatesCard" hidden>
+      <div class="section-title">
+        <h2>Candidatos próximos do filtro</h2>
+        <p>Use esta área quando você sabe que há anúncios, mas os metadados vieram incompletos.</p>
+      </div>
+      <div id="candidates" class="listing-grid"></div>
     </section>
 
     <section class="card" id="dealersCard" hidden>
@@ -75,59 +94,82 @@
       return text.split(',').map(x => parseInt(x.trim(), 10)).filter(Boolean);
     }
 
+    function escapeHtml(str) {
+      return (str || '').replace(/[&<>\"]/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[s]));
+    }
+
     function payloadFromForm() {
       return {
         min_price: parseInt(document.getElementById('min_price').value || '0', 10),
         max_price: parseInt(document.getElementById('max_price').value || '0', 10),
         years: parseYears(document.getElementById('years').value || ''),
-        version_keywords: (document.getElementById('version_keywords').value || '')
-          .split(',').map(x => x.trim()).filter(Boolean),
-        only_new: document.getElementById('only_new').checked
+        version_keywords: (document.getElementById('version_keywords').value || '').split(',').map(x => x.trim()).filter(Boolean),
+        only_new: document.getElementById('only_new').checked,
+        strict_keywords: document.getElementById('strict_keywords').checked,
       }
     }
 
-    function escapeHtml(str) {
-      return (str || '').replace(/[&<>"]/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[s]));
+    function badgeList(tags) {
+      if (!tags || !tags.length) return '';
+      return `<div class="badges">${tags.map(tag => `<span class="tag">${escapeHtml(tag)}</span>`).join('')}</div>`;
     }
 
-    function renderResults(items) {
-      const root = document.getElementById('results');
+    function listingCard(item) {
+      const externalUrl = item.url && item.url !== '#' ? item.url : item.dealer_url;
+      const openButton = externalUrl ? `<a class="link-btn" href="${escapeHtml(externalUrl)}" target="_blank" rel="noopener noreferrer">Abrir anúncio</a>` : '';
+      const storeButton = item.dealer_url ? `<a class="link-btn secondary-link" href="${escapeHtml(item.dealer_url)}" target="_blank" rel="noopener noreferrer">Abrir loja</a>` : '';
+      const newBadge = item.is_new ? '<span class="pill new">NOVO</span>' : '';
+      const scoreBadge = item.relevance_score ? `<span class="pill">Score ${item.relevance_score}</span>` : '';
+      return `
+        <article class="listing-card">
+          <div class="top-row">
+            <div>
+              <h3>${escapeHtml(item.model || 'Jeep Renegade')}</h3>
+              <p class="muted">${escapeHtml(item.version || 'Versão não identificada')}</p>
+            </div>
+            <div class="pill-group">${newBadge}${scoreBadge}</div>
+          </div>
+          <div class="price">${escapeHtml(item.price_label || 'Sob consulta')}</div>
+          <div class="meta-grid">
+            <div><span class="meta-label">Ano</span><strong>${escapeHtml(item.year || 'N/I')}</strong></div>
+            <div><span class="meta-label">KM</span><strong>${escapeHtml(item.km || 'N/I')}</strong></div>
+            <div><span class="meta-label">Cor</span><strong>${escapeHtml(item.color || 'N/I')}</strong></div>
+            <div><span class="meta-label">Origem</span><strong>${escapeHtml(item.dealer || '')}</strong></div>
+          </div>
+          <p class="dealer-line">${escapeHtml(item.city || '')} · ${escapeHtml(item.platform || '')}</p>
+          ${badgeList(item.reason_tags || [])}
+          <div class="card-actions">${openButton}${storeButton}</div>
+        </article>
+      `;
+    }
+
+    function renderList(rootId, items, emptyText) {
+      const root = document.getElementById(rootId);
       if (!items.length) {
-        root.innerHTML = '<p class="empty">Nenhum anúncio encontrado com esse filtro.</p>';
+        root.innerHTML = `<p class="empty">${escapeHtml(emptyText)}</p>`;
         return;
       }
-      root.innerHTML = items.map(item => `
-        <article class="listing ${item.is_new ? 'is-new' : ''}">
-          <div class="listing-top">
-            <div>
-              <h3>${escapeHtml(item.model)} <small>${escapeHtml(item.version || '')}</small></h3>
-              <p>${escapeHtml(item.dealer || '')} · ${escapeHtml(item.city || '')}</p>
-            </div>
-            ${item.is_new ? '<span class="badge">NOVO</span>' : ''}
-          </div>
-          <div class="meta">
-            <span><strong>Ano:</strong> ${escapeHtml(item.year || 'N/I')}</span>
-            <span><strong>Preço:</strong> ${escapeHtml(item.price_label || 'Sob consulta')}</span>
-            <span><strong>KM:</strong> ${escapeHtml(item.km || 'N/I')}</span>
-            <span><strong>Cor:</strong> ${escapeHtml(item.color || 'N/I')}</span>
-          </div>
-          <div class="listing-actions">
-            <a href="${escapeHtml(item.url || '#')}" target="_blank" rel="noopener noreferrer">Abrir anúncio</a>
-          </div>
-        </article>
-      `).join('');
+      root.innerHTML = items.map(listingCard).join('');
     }
 
     function renderDealers(items) {
       const root = document.getElementById('dealers');
       root.innerHTML = items.map(item => `
         <div class="dealer-row">
-          <strong>${escapeHtml(item.dealer || '')}</strong>
-          <span>${escapeHtml(item.city || '')}</span>
-          <span>${escapeHtml(item.platform || '')}</span>
-          <span>${item.found_raw || 0} encontrado(s)</span>
+          <div>
+            <strong>${escapeHtml(item.dealer)}</strong>
+            <div class="muted small">${escapeHtml(item.city)}</div>
+          </div>
+          <span>${escapeHtml(item.platform)}</span>
+          <span>${item.found_raw} encontrado(s)</span>
+          <a href="${escapeHtml(item.dealer_url || '#')}" target="_blank" rel="noopener noreferrer">Abrir loja</a>
         </div>
       `).join('');
+    }
+
+    function renderMessages(messages) {
+      const root = document.getElementById('messages');
+      root.innerHTML = (messages || []).map(msg => `<div class="message">${escapeHtml(msg)}</div>`).join('');
     }
 
     async function runScan() {
@@ -144,11 +186,15 @@
         if (!resp.ok) throw new Error(data.error || 'Falha na busca');
         document.getElementById('summary').hidden = false;
         document.getElementById('resultsCard').hidden = false;
+        document.getElementById('candidatesCard').hidden = false;
         document.getElementById('dealersCard').hidden = false;
         document.getElementById('executed_at').textContent = data.executed_at || '-';
         document.getElementById('total_raw').textContent = data.total_raw || 0;
         document.getElementById('total_filtered').textContent = data.total_filtered || 0;
-        renderResults(data.results || []);
+        document.getElementById('total_candidates').textContent = data.total_candidates || 0;
+        renderMessages(data.messages || []);
+        renderList('results', data.results || [], 'Nenhum anúncio dentro do filtro.');
+        renderList('candidates', data.candidates || [], 'Nenhum candidato adicional encontrado.');
         renderDealers(data.dealer_stats || []);
       } catch (err) {
         alert(err.message || 'Erro ao executar a busca.');
@@ -163,11 +209,14 @@
       const data = await resp.json();
       document.getElementById('summary').hidden = false;
       document.getElementById('resultsCard').hidden = false;
+      document.getElementById('candidatesCard').hidden = true;
       document.getElementById('dealersCard').hidden = true;
       document.getElementById('executed_at').textContent = 'Histórico salvo';
       document.getElementById('total_raw').textContent = data.total || 0;
       document.getElementById('total_filtered').textContent = data.total || 0;
-      renderResults(data.results || []);
+      document.getElementById('total_candidates').textContent = 0;
+      renderMessages(['Histórico consolidado do banco local.']);
+      renderList('results', data.results || [], 'Ainda não há anúncios salvos.');
     }
 
     document.getElementById('scanBtn').addEventListener('click', runScan);
