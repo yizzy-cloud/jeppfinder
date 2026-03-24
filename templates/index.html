@@ -172,6 +172,18 @@
       root.innerHTML = (messages || []).map(msg => `<div class="message">${escapeHtml(msg)}</div>`).join('');
     }
 
+    async function safeJsonResponse(resp, endpointName) {
+      const contentType = resp.headers.get('content-type') || '';
+
+      if (!contentType.includes('application/json')) {
+        const raw = await resp.text();
+        console.error(`Resposta não JSON em ${endpointName}:`, raw);
+        throw new Error(`O servidor falhou em ${endpointName}. Verifique os logs do Render.`);
+      }
+
+      return await resp.json();
+    }
+
     async function runScan() {
       const btn = document.getElementById('scanBtn');
       btn.disabled = true;
@@ -182,8 +194,13 @@
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify(payloadFromForm())
         });
-        const data = await resp.json();
-        if (!resp.ok) throw new Error(data.error || 'Falha na busca');
+
+        const data = await safeJsonResponse(resp, '/api/scan');
+
+        if (!resp.ok) {
+          throw new Error(data.error || 'Falha na busca');
+        }
+
         document.getElementById('summary').hidden = false;
         document.getElementById('resultsCard').hidden = false;
         document.getElementById('candidatesCard').hidden = false;
@@ -197,6 +214,7 @@
         renderList('candidates', data.candidates || [], 'Nenhum candidato adicional encontrado.');
         renderDealers(data.dealer_stats || []);
       } catch (err) {
+        console.error(err);
         alert(err.message || 'Erro ao executar a busca.');
       } finally {
         btn.disabled = false;
@@ -205,18 +223,28 @@
     }
 
     async function loadHistory() {
-      const resp = await fetch('/api/listings');
-      const data = await resp.json();
-      document.getElementById('summary').hidden = false;
-      document.getElementById('resultsCard').hidden = false;
-      document.getElementById('candidatesCard').hidden = true;
-      document.getElementById('dealersCard').hidden = true;
-      document.getElementById('executed_at').textContent = 'Histórico salvo';
-      document.getElementById('total_raw').textContent = data.total || 0;
-      document.getElementById('total_filtered').textContent = data.total || 0;
-      document.getElementById('total_candidates').textContent = 0;
-      renderMessages(['Histórico consolidado do banco local.']);
-      renderList('results', data.results || [], 'Ainda não há anúncios salvos.');
+      try {
+        const resp = await fetch('/api/listings');
+        const data = await safeJsonResponse(resp, '/api/listings');
+
+        if (!resp.ok) {
+          throw new Error(data.error || 'Falha ao carregar histórico');
+        }
+
+        document.getElementById('summary').hidden = false;
+        document.getElementById('resultsCard').hidden = false;
+        document.getElementById('candidatesCard').hidden = true;
+        document.getElementById('dealersCard').hidden = true;
+        document.getElementById('executed_at').textContent = 'Histórico salvo';
+        document.getElementById('total_raw').textContent = data.total || 0;
+        document.getElementById('total_filtered').textContent = data.total || 0;
+        document.getElementById('total_candidates').textContent = 0;
+        renderMessages(['Histórico consolidado do banco local.']);
+        renderList('results', data.results || [], 'Ainda não há anúncios salvos.');
+      } catch (err) {
+        console.error(err);
+        alert(err.message || 'Erro ao carregar histórico.');
+      }
     }
 
     document.getElementById('scanBtn').addEventListener('click', runScan);
