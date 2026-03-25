@@ -46,17 +46,25 @@
         </label>
       </div>
       
-      <div class="controls-row" style="margin-top: 24px; display: flex; align-items: center; gap: 24px;">
-        <label class="toggle" style="cursor: pointer;">
+      <div class="checkbox-group">
+        <label>
           <input id="only_new" type="checkbox"> Apenas anúncios novos
         </label>
-        <label class="toggle" style="cursor: pointer;">
+        <label>
           <input id="strict_keywords" type="checkbox"> Exigir todas as palavras da versão
         </label>
       </div>
       
-      <div class="actions" style="margin-top: 24px; border-top: 1px solid #dde3ea; padding-top: 20px;">
-        <button id="buscarBtn">Pesquisar no Banco de Dados</button>
+      <div class="actions" style="margin-top: 24px; border-top: 1px solid #dde3ea; padding-top: 20px; display: flex; gap: 16px;">
+        <button id="buscarBtn">Pesquisar (Filtro Rápido)</button>
+        <button id="syncBtn" class="secondary" style="background-color: #5b6779;">Sincronizar Concessionárias</button>
+      </div>
+
+      <div id="progressContainer" class="progress-container">
+        <div class="progress-bar"></div>
+        <p style="text-align: center; font-size: 14px; color: #5b6779; margin: 12px 0 8px;">
+          Varrendo os sites de 21 concessionárias... Isso leva cerca de 2 a 3 minutos. Não feche a página!
+        </p>
       </div>
     </section>
 
@@ -296,7 +304,72 @@
 
     // Faz o botão funcionar ao clicar
     document.getElementById('buscarBtn').addEventListener('click', buscarNoBanco);
-    
+    let radarInterval;
+
+    async function iniciarVarredura() {
+      // 1. Pede a senha para garantir que visitantes não travem seu servidor
+      const senha = prompt("Digite a senha (SCAN_TOKEN) para rodar a varredura nas 21 lojas:");
+      if (!senha) return;
+
+      const btnSync = document.getElementById('syncBtn');
+      const btnBusca = document.getElementById('buscarBtn');
+      const progress = document.getElementById('progressContainer');
+
+      // 2. Trava os botões e mostra a barra de carregamento
+      btnSync.disabled = true;
+      btnBusca.disabled = true;
+      progress.style.display = 'block';
+      renderMessages(['Conectando com o servidor para iniciar varredura em 2º plano...']);
+
+      try {
+        // 3. Dispara a rota secreta
+        const resp = await fetch('/api/scan-secret', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Scan-Token': senha
+          },
+          body: JSON.stringify(payloadFromForm())
+        });
+
+        if (!resp.ok) throw new Error("Senha incorreta ou servidor recusou a conexão.");
+
+        renderMessages(['Varredura iniciada! O servidor está baixando os carros. Aguarde...']);
+        
+        // 4. Inicia o "Radar": Checa o banco de dados a cada 8 segundos para ver se os carros chegaram!
+        radarInterval = setInterval(checarSeTerminou, 8000);
+
+      } catch (err) {
+        alert("Erro ao iniciar varredura: " + err.message);
+        pararVarredura();
+      }
+    }
+
+    async function checarSeTerminou() {
+      try {
+        const resp = await fetch('/api/listings');
+        const data = await resp.json();
+        
+        // Se o banco agora tem dados, a varredura terminou!
+        if (data.total > 0) {
+          pararVarredura();
+          buscarNoBanco(); // Roda o filtro automático na tela
+          renderMessages(['Varredura concluída com sucesso! Os dados foram atualizados.']);
+        }
+      } catch (e) {
+        console.log("Aguardando servidor...");
+      }
+    }
+
+    function pararVarredura() {
+      clearInterval(radarInterval);
+      document.getElementById('syncBtn').disabled = false;
+      document.getElementById('buscarBtn').disabled = false;
+      document.getElementById('progressContainer').style.display = 'none';
+    }
+
+    // Liga o botão novo à função
+    document.getElementById('syncBtn').addEventListener('click', iniciarVarredura);
     // Faz a pesquisa rodar sozinha assim que você abre o site
     window.addEventListener('DOMContentLoaded', buscarNoBanco);
   </script>
