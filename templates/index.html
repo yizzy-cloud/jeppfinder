@@ -26,8 +26,24 @@
       </div>
     </section>
 
-    <section class="card filters">
-    <div class="grid-filtros">
+   <section class="card filters">
+      <div class="grid-filtros">
+        <label>
+          <span>Preço mínimo (R$)</span>
+          <input id="min_price" type="number" value="{{ default_filters.min_price }}">
+        </label>
+        <label>
+          <span>Preço máximo (R$)</span>
+          <input id="max_price" type="number" value="{{ default_filters.max_price }}">
+        </label>
+        <label>
+          <span>Anos (separados por vírgula)</span>
+          <input id="years" type="text" value="{{ default_filters.years | join(',') }}">
+        </label>
+        <label>
+          <span>Versão (palavras-chave)</span>
+          <input id="version_keywords" type="text" value="{{ default_filters.version_keywords | join(', ') }}">
+        </label>
         <label>
           <span>Cor</span>
           <input id="color_filter" type="text" placeholder="Ex: branco, cinza">
