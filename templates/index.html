@@ -249,6 +249,8 @@
 
     document.getElementById('scanBtn').addEventListener('click', runScan);
     document.getElementById('historyBtn').addEventListener('click', loadHistory);
+ // Faz a página carregar o histórico automaticamente assim que for aberta
+    window.addEventListener('DOMContentLoaded', loadHistory);
   </script>
 </body>
 </html>
