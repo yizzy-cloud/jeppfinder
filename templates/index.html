@@ -26,7 +26,7 @@
       </div>
     </section>
 
-   <section class="card filters">
+    <section class="card filters">
       <div class="grid-filtros">
         <label>
           <span>Preço mínimo (R$)</span>
@@ -126,19 +126,14 @@
       }
     }
 
-    // === NOVA MONTAGEM DOS CARDS COM VISUAL PREMIUM E LINKS CORRIGIDOS ===
     function listingCard(item) {
-      // Verifica se o robô conseguiu o link exato ou só o site da loja
       const temLinkExato = item.url && item.url !== item.dealer_url && item.url !== '#';
-      
       const btnAnuncio = temLinkExato 
         ? `<a class="btn-anuncio" href="${escapeHtml(item.url)}" target="_blank">Ver Anúncio</a>` 
-        : ``; // Se não tem link exato, não mostra botão enganoso
-
+        : ``; 
       const btnLoja = item.dealer_url 
         ? `<a class="${temLinkExato ? 'btn-loja' : 'btn-anuncio'}" href="${escapeHtml(item.dealer_url)}" target="_blank">${temLinkExato ? 'Site da Loja' : 'Ir para a Loja'}</a>` 
         : '';
-
       const newBadge = item.is_new ? '<span class="tag new-tag">★ NOVO</span>' : '';
       
       return `
@@ -147,20 +142,17 @@
             <h3>${escapeHtml(item.model || 'Jeep Renegade')}</h3>
             <span class="version">${escapeHtml(item.version || 'Versão não identificada')}</span>
           </div>
-          
           <div class="price-tag">${escapeHtml(item.price_label || 'Sob consulta')}</div>
-          
           <div class="car-details">
             <div>📅 Ano: <strong>${escapeHtml(item.year || '-')}</strong></div>
             <div>🛣️ KM: <strong>${escapeHtml(item.km || '-')}</strong></div>
             <div class="full-width">📍 Origem: <strong>${escapeHtml(item.dealer || '')}</strong> (${escapeHtml(item.city || '')})</div>
+            <div class="full-width">🎨 Cor: <strong style="text-transform: capitalize;">${escapeHtml(item.color || 'N/I')}</strong></div>
           </div>
-          
           <div class="badges">
             ${newBadge}
             ${(item.reason_tags || []).map(t => `<span class="tag">${escapeHtml(t)}</span>`).join('')}
           </div>
-          
           <div class="card-actions">
             ${btnAnuncio}
             ${btnLoja}
@@ -189,11 +181,9 @@
       root.innerHTML = (messages || []).map(msg => `<div class="message">${escapeHtml(msg)}</div>`).join('');
     }
 
-    // === NOVO FILTRO DE PESQUISA (CORRIGIDO PARA IGNORAR "SOB CONSULTA") ===
     async function buscarNoBanco() {
       const btn = document.getElementById('buscarBtn');
       const textoOriginal = btn.textContent;
-      
       btn.disabled = true;
       btn.textContent = 'Filtrando resultados...';
       
@@ -201,7 +191,6 @@
         const payload = payloadFromForm();
         const resp = await fetch('/api/listings');
         const data = await resp.json();
-        
         if (!resp.ok) throw new Error('Falha ao acessar o banco local');
 
         const carrosFiltrados = data.results.filter(carro => {
@@ -210,17 +199,14 @@
           const anoCarro = parseInt((carro.year || '').split('/')[0]) || 0;
           const textoBusca = `${carro.model} ${carro.version} ${carro.notes}`.toLowerCase();
 
-          // CORREÇÃO DO FILTRO DE PREÇO: Exclui os "Sob consulta" se houver limite de preço
           if (payload.min_price > 0 || payload.max_price > 0) {
             if (preco === 0) return false; 
             if (payload.min_price > 0 && preco < payload.min_price) return false;
             if (payload.max_price > 0 && preco > payload.max_price) return false;
           }
 
-          // Filtro de Ano
           if (anosSelecionados.length > 0 && anoCarro > 0 && !anosSelecionados.includes(anoCarro)) return false;
 
-          // Filtro de Versão/Palavras-chave
           if (payload.version_keywords.length > 0) {
             if (payload.strict_keywords) {
               const temTodas = payload.version_keywords.every(kw => textoBusca.includes(kw));
@@ -230,26 +216,21 @@
               if (!temAlguma) return false;
             }
           }
-// Logo após o "Filtro de Ano", adicione o Filtro de Cor:
+
           if (payload.color_filter) {
             const corCarro = (carro.color || '').toLowerCase();
             const notasCarro = (carro.notes || '').toLowerCase();
-            
-            // Se a cor do carro não for a digitada E a cor não estiver escondida nas notas do anúncio, esconde o carro.
             if (!corCarro.includes(payload.color_filter) && !notasCarro.includes(payload.color_filter)) {
               return false;
             }
           }
-          // Filtro de Novo
-          if (payload.only_new && !carro.is_new) return false;
 
-          return true; // Passou em tudo!
+          if (payload.only_new && !carro.is_new) return false;
+          return true;
         });
 
-        // Atualiza a tela
         document.getElementById('summary').hidden = false;
         document.getElementById('resultsCard').hidden = false;
-        
         document.getElementById('executed_at').textContent = 'Agora (Filtro Rápido)';
         document.getElementById('total_raw').textContent = data.total || 0;
         document.getElementById('total_filtered').textContent = carrosFiltrados.length;
@@ -257,7 +238,6 @@
         
         renderMessages(['Busca aplicada aos dados salvos no banco.']);
         
-        // Exibe os cards ou a mensagem de vazio
         const resultsContainer = document.getElementById('results');
         if (carrosFiltrados.length === 0) {
             resultsContainer.innerHTML = '<div class="empty-state" style="grid-column: 1 / -1; text-align: center; padding: 40px; color: #5b6779; font-size: 18px; background: #f8fafc; border-radius: 12px;">Nenhum Renegade encontrado com estes filtros exatos. Tente remover palavras-chave ou alterar o preço.</div>';
@@ -273,7 +253,6 @@
       }
     }
 
-    // === SISTEMA DO RADAR / SINCRONIZAÇÃO EM 2º PLANO ===
     let radarInterval;
 
     async function iniciarVarredura() {
@@ -314,7 +293,6 @@
       try {
         const resp = await fetch('/api/listings');
         const data = await resp.json();
-        
         if (data.total > 0) {
           pararVarredura();
           buscarNoBanco();
@@ -332,7 +310,6 @@
       document.getElementById('progressContainer').style.display = 'none';
     }
 
-    // Liga os botões
     document.getElementById('buscarBtn').addEventListener('click', buscarNoBanco);
     document.getElementById('syncBtn').addEventListener('click', iniciarVarredura);
     window.addEventListener('DOMContentLoaded', buscarNoBanco);
