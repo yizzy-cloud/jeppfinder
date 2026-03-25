@@ -20,7 +20,11 @@ body{margin:0;background:var(--bg);font-family:Arial,sans-serif;color:var(--text
 .mini-card{background:#eef2f7;border-radius:16px;padding:18px;font-size:18px}
 .mini-card.neutral{background:#f7f8fa}
 .grid{display:grid;gap:16px}
-.grid.four{grid-template-columns:repeat(4,minmax(0,1fr))}
+.grid-filtros {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+}
 label span{display:block;font-size:14px;color:#334155;margin-bottom:8px}
 /* Arrumando as caixas de texto para não estragar os checkboxes */
 input:not([type="checkbox"]) {
