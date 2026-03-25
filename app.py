@@ -797,28 +797,9 @@ app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "change-me")
 init_db()
 
 
-@app.get("/")
+@app.get('/')
 def index():
-    return render_template(
-        "index.html",
-        default_filters=DEFAULT_FILTERS,
-        dealers=ACTIVE_DEALERS,
-        new_window_hours=NEW_WINDOW_HOURS,
-    )
-
-
-@app.post("/api/scan")
-def api_scan():
-    try:
-        filters = normalize_filters(request.get_json(silent=True))
-        result = run_scan(filters)
-        return jsonify(result), 200
-    except Exception as e:
-        traceback.print_exc()
-        return jsonify({
-            "error": f"Erro interno em /api/scan: {str(e)}",
-            "trace_hint": "Verifique os logs do Render para o traceback completo."
-        }), 500
+    return render_template('index.html', default_filters=DEFAULT_FILTERS, dealers=DEALERS, new_window_hours=NEW_WINDOW_HOURS)
 
 
 @app.post('/api/scan')
@@ -826,7 +807,7 @@ def api_scan():
     filters = normalize_filters(request.get_json(silent=True))
     return jsonify(run_scan(filters))
 
-# DEIXE APENAS ESTE BLOCO ABAIXO, NÃO PODE TER DOIS IGUAIS A ELE:
+
 @app.post('/api/scan-secret')
 def api_scan_secret():
     token = request.headers.get('X-Scan-Token', '')
@@ -846,6 +827,23 @@ def api_scan_secret():
         'total_filtrado': resultado['total_filtered']
     })
 
+
 @app.get('/api/listings')
 def api_listings():
-    # ... resto do código ...
+    only_new = request.args.get('only_new', 'false').lower() == 'true'
+    conn = get_db()
+    rows = conn.execute('SELECT * FROM listings ORDER BY last_seen_at DESC, relevance_score DESC, price ASC').fetchall()
+    conn.close()
+    items = [row_to_listing(row) for row in rows]
+    if only_new:
+        items = [item for item in items if item['is_new']]
+    return jsonify({'total': len(items), 'results': items})
+
+
+@app.get('/api/health')
+def api_health():
+    return jsonify({'status': 'ok', 'time': now_iso(), 'db_path': str(DB_PATH)})
+
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=PORT)
