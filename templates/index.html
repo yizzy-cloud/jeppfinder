@@ -223,12 +223,36 @@
     }
 
     async function loadHistory() {
+      const btn = document.getElementById('historyBtn');
+      const textoOriginal = btn.textContent;
+      
+      // Muda o texto e desativa o botão para dar o "efeito visual" de que está trabalhando
+      btn.disabled = true;
+      btn.textContent = 'Atualizando...';
+      
       try {
         const resp = await fetch('/api/listings');
-        const data = await safeJsonResponse(resp, '/api/listings');
-
-        if (!resp.ok) {
-          throw new Error(data.error || 'Falha ao carregar histórico');
+        const data = await resp.json();
+        
+        document.getElementById('summary').hidden = false;
+        document.getElementById('resultsCard').hidden = false;
+        document.getElementById('candidatesCard').hidden = true;
+        document.getElementById('dealersCard').hidden = true;
+        
+        document.getElementById('executed_at').textContent = 'Histórico salvo';
+        document.getElementById('total_raw').textContent = data.total || 0;
+        document.getElementById('total_filtered').textContent = data.total || 0;
+        document.getElementById('total_candidates').textContent = 0;
+        
+        renderMessages(['Histórico atualizado com sucesso do banco local.']);
+        renderList('results', data.results || [], 'Ainda não há anúncios salvos. O robô precisa rodar primeiro!');
+      } catch (err) {
+        alert('Erro ao atualizar a tela: ' + err.message);
+      } finally {
+        // Devolve o botão ao estado normal
+        btn.disabled = false;
+        btn.textContent = textoOriginal;
+      }
         }
 
         document.getElementById('summary').hidden = false;
