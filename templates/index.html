@@ -21,7 +21,7 @@
         </div>
         <div class="mini-card neutral">
           <strong>Modo atual</strong>
-          <div>Busca com link do anúncio e candidatos próximos</div>
+          <div>Busca no banco de dados sincronizado</div>
         </div>
       </div>
     </section>
@@ -121,47 +121,47 @@
       }
     }
 
-    function badgeList(tags) {
-      if (!tags || !tags.length) return '';
-      return `<div class="badges">${tags.map(tag => `<span class="tag">${escapeHtml(tag)}</span>`).join('')}</div>`;
-    }
-
+    // === NOVA MONTAGEM DOS CARDS COM VISUAL PREMIUM E LINKS CORRIGIDOS ===
     function listingCard(item) {
-      const externalUrl = item.url && item.url !== '#' ? item.url : item.dealer_url;
-      const openButton = externalUrl ? `<a class="link-btn" href="${escapeHtml(externalUrl)}" target="_blank" rel="noopener noreferrer">Abrir anúncio</a>` : '';
-      const storeButton = item.dealer_url ? `<a class="link-btn secondary-link" href="${escapeHtml(item.dealer_url)}" target="_blank" rel="noopener noreferrer">Abrir loja</a>` : '';
-      const newBadge = item.is_new ? '<span class="pill new">NOVO</span>' : '';
-      const scoreBadge = item.relevance_score ? `<span class="pill">Score ${item.relevance_score}</span>` : '';
+      // Verifica se o robô conseguiu o link exato ou só o site da loja
+      const temLinkExato = item.url && item.url !== item.dealer_url && item.url !== '#';
+      
+      const btnAnuncio = temLinkExato 
+        ? `<a class="btn-anuncio" href="${escapeHtml(item.url)}" target="_blank">Ver Anúncio</a>` 
+        : ``; // Se não tem link exato, não mostra botão enganoso
+
+      const btnLoja = item.dealer_url 
+        ? `<a class="${temLinkExato ? 'btn-loja' : 'btn-anuncio'}" href="${escapeHtml(item.dealer_url)}" target="_blank">${temLinkExato ? 'Site da Loja' : 'Ir para a Loja'}</a>` 
+        : '';
+
+      const newBadge = item.is_new ? '<span class="tag new-tag">★ NOVO</span>' : '';
+      
       return `
         <article class="listing-card">
-          <div class="top-row">
-            <div>
-              <h3>${escapeHtml(item.model || 'Jeep Renegade')}</h3>
-              <p class="muted">${escapeHtml(item.version || 'Versão não identificada')}</p>
-            </div>
-            <div class="pill-group">${newBadge}${scoreBadge}</div>
+          <div class="card-header">
+            <h3>${escapeHtml(item.model || 'Jeep Renegade')}</h3>
+            <span class="version">${escapeHtml(item.version || 'Versão não identificada')}</span>
           </div>
-          <div class="price">${escapeHtml(item.price_label || 'Sob consulta')}</div>
-          <div class="meta-grid">
-            <div><span class="meta-label">Ano</span><strong>${escapeHtml(item.year || 'N/I')}</strong></div>
-            <div><span class="meta-label">KM</span><strong>${escapeHtml(item.km || 'N/I')}</strong></div>
-            <div><span class="meta-label">Cor</span><strong>${escapeHtml(item.color || 'N/I')}</strong></div>
-            <div><span class="meta-label">Origem</span><strong>${escapeHtml(item.dealer || '')}</strong></div>
+          
+          <div class="price-tag">${escapeHtml(item.price_label || 'Sob consulta')}</div>
+          
+          <div class="car-details">
+            <div>📅 Ano: <strong>${escapeHtml(item.year || '-')}</strong></div>
+            <div>🛣️ KM: <strong>${escapeHtml(item.km || '-')}</strong></div>
+            <div class="full-width">📍 Origem: <strong>${escapeHtml(item.dealer || '')}</strong> (${escapeHtml(item.city || '')})</div>
           </div>
-          <p class="dealer-line">${escapeHtml(item.city || '')} · ${escapeHtml(item.platform || '')}</p>
-          ${badgeList(item.reason_tags || [])}
-          <div class="card-actions">${openButton}${storeButton}</div>
+          
+          <div class="badges">
+            ${newBadge}
+            ${(item.reason_tags || []).map(t => `<span class="tag">${escapeHtml(t)}</span>`).join('')}
+          </div>
+          
+          <div class="card-actions">
+            ${btnAnuncio}
+            ${btnLoja}
+          </div>
         </article>
       `;
-    }
-
-    function renderList(rootId, items, emptyText) {
-      const root = document.getElementById(rootId);
-      if (!items.length) {
-        root.innerHTML = `<p class="empty">${escapeHtml(emptyText)}</p>`;
-        return;
-      }
-      root.innerHTML = items.map(listingCard).join('');
     }
 
     function renderDealers(items) {
@@ -184,57 +184,8 @@
       root.innerHTML = (messages || []).map(msg => `<div class="message">${escapeHtml(msg)}</div>`).join('');
     }
 
-    async function safeJsonResponse(resp, endpointName) {
-      const contentType = resp.headers.get('content-type') || '';
-
-      if (!contentType.includes('application/json')) {
-        const raw = await resp.text();
-        console.error(`Resposta não JSON em ${endpointName}:`, raw);
-        throw new Error(`O servidor falhou em ${endpointName}. Verifique os logs do Render.`);
-      }
-
-      return await resp.json();
-    }
-
-    async function runScan() {
-      const btn = document.getElementById('scanBtn');
-      btn.disabled = true;
-      btn.textContent = 'Buscando...';
-      try {
-        const resp = await fetch('/api/scan', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify(payloadFromForm())
-        });
-
-        const data = await safeJsonResponse(resp, '/api/scan');
-
-        if (!resp.ok) {
-          throw new Error(data.error || 'Falha na busca');
-        }
-
-        document.getElementById('summary').hidden = false;
-        document.getElementById('resultsCard').hidden = false;
-        document.getElementById('candidatesCard').hidden = false;
-        document.getElementById('dealersCard').hidden = false;
-        document.getElementById('executed_at').textContent = data.executed_at || '-';
-        document.getElementById('total_raw').textContent = data.total_raw || 0;
-        document.getElementById('total_filtered').textContent = data.total_filtered || 0;
-        document.getElementById('total_candidates').textContent = data.total_candidates || 0;
-        renderMessages(data.messages || []);
-        renderList('results', data.results || [], 'Nenhum anúncio dentro do filtro.');
-        renderList('candidates', data.candidates || [], 'Nenhum candidato adicional encontrado.');
-        renderDealers(data.dealer_stats || []);
-      } catch (err) {
-        console.error(err);
-        alert(err.message || 'Erro ao executar a busca.');
-      } finally {
-        btn.disabled = false;
-        btn.textContent = 'Buscar anúncios';
-      }
-    }
-
-   async function buscarNoBanco() {
+    // === NOVO FILTRO DE PESQUISA (CORRIGIDO PARA IGNORAR "SOB CONSULTA") ===
+    async function buscarNoBanco() {
       const btn = document.getElementById('buscarBtn');
       const textoOriginal = btn.textContent;
       
@@ -242,25 +193,24 @@
       btn.textContent = 'Filtrando resultados...';
       
       try {
-        // Pega os filtros que você digitou na tela
         const payload = payloadFromForm();
-        
-        // Puxa todos os carros que o robô já salvou no banco
         const resp = await fetch('/api/listings');
         const data = await resp.json();
         
         if (!resp.ok) throw new Error('Falha ao acessar o banco local');
 
-        // Filtra a lista de carros usando as regras da sua tela
         const carrosFiltrados = data.results.filter(carro => {
           const preco = parseFloat(carro.price) || 0;
           const anosSelecionados = payload.years;
           const anoCarro = parseInt((carro.year || '').split('/')[0]) || 0;
           const textoBusca = `${carro.model} ${carro.version} ${carro.notes}`.toLowerCase();
 
-          // Filtro de Preço
-          if (preco > 0 && payload.min_price > 0 && preco < payload.min_price) return false;
-          if (preco > 0 && payload.max_price > 0 && preco > payload.max_price) return false;
+          // CORREÇÃO DO FILTRO DE PREÇO: Exclui os "Sob consulta" se houver limite de preço
+          if (payload.min_price > 0 || payload.max_price > 0) {
+            if (preco === 0) return false; 
+            if (payload.min_price > 0 && preco < payload.min_price) return false;
+            if (payload.max_price > 0 && preco > payload.max_price) return false;
+          }
 
           // Filtro de Ano
           if (anosSelecionados.length > 0 && anoCarro > 0 && !anosSelecionados.includes(anoCarro)) return false;
@@ -279,20 +229,27 @@
           // Filtro de Novo
           if (payload.only_new && !carro.is_new) return false;
 
-          return true; // Se passou em todos os testes, mostra o carro!
+          return true; // Passou em tudo!
         });
 
-        // Mostra na tela
+        // Atualiza a tela
         document.getElementById('summary').hidden = false;
         document.getElementById('resultsCard').hidden = false;
         
         document.getElementById('executed_at').textContent = 'Agora (Filtro Rápido)';
         document.getElementById('total_raw').textContent = data.total || 0;
         document.getElementById('total_filtered').textContent = carrosFiltrados.length;
-        document.getElementById('total_candidates').textContent = '-'; // Desativado no modo rápido
+        document.getElementById('total_candidates').textContent = '-'; 
         
-        renderMessages(['Busca aplicada aos dados salvos pelo seu robô.']);
-        renderList('results', carrosFiltrados, 'Nenhum carro encontrado com esses filtros exatos.');
+        renderMessages(['Busca aplicada aos dados salvos no banco.']);
+        
+        // Exibe os cards ou a mensagem de vazio
+        const resultsContainer = document.getElementById('results');
+        if (carrosFiltrados.length === 0) {
+            resultsContainer.innerHTML = '<div class="empty-state" style="grid-column: 1 / -1; text-align: center; padding: 40px; color: #5b6779; font-size: 18px; background: #f8fafc; border-radius: 12px;">Nenhum Renegade encontrado com estes filtros exatos. Tente remover palavras-chave ou alterar o preço.</div>';
+        } else {
+            resultsContainer.innerHTML = carrosFiltrados.map(listingCard).join('');
+        }
         
       } catch (err) {
         alert('Erro ao filtrar: ' + err.message);
@@ -302,12 +259,10 @@
       }
     }
 
-    // Faz o botão funcionar ao clicar
-    document.getElementById('buscarBtn').addEventListener('click', buscarNoBanco);
+    // === SISTEMA DO RADAR / SINCRONIZAÇÃO EM 2º PLANO ===
     let radarInterval;
 
     async function iniciarVarredura() {
-      // 1. Pede a senha para garantir que visitantes não travem seu servidor
       const senha = prompt("Digite a senha (SCAN_TOKEN) para rodar a varredura nas 21 lojas:");
       if (!senha) return;
 
@@ -315,14 +270,12 @@
       const btnBusca = document.getElementById('buscarBtn');
       const progress = document.getElementById('progressContainer');
 
-      // 2. Trava os botões e mostra a barra de carregamento
       btnSync.disabled = true;
       btnBusca.disabled = true;
       progress.style.display = 'block';
       renderMessages(['Conectando com o servidor para iniciar varredura em 2º plano...']);
 
       try {
-        // 3. Dispara a rota secreta
         const resp = await fetch('/api/scan-secret', {
           method: 'POST',
           headers: {
@@ -335,8 +288,6 @@
         if (!resp.ok) throw new Error("Senha incorreta ou servidor recusou a conexão.");
 
         renderMessages(['Varredura iniciada! O servidor está baixando os carros. Aguarde...']);
-        
-        // 4. Inicia o "Radar": Checa o banco de dados a cada 8 segundos para ver se os carros chegaram!
         radarInterval = setInterval(checarSeTerminou, 8000);
 
       } catch (err) {
@@ -350,10 +301,9 @@
         const resp = await fetch('/api/listings');
         const data = await resp.json();
         
-        // Se o banco agora tem dados, a varredura terminou!
         if (data.total > 0) {
           pararVarredura();
-          buscarNoBanco(); // Roda o filtro automático na tela
+          buscarNoBanco();
           renderMessages(['Varredura concluída com sucesso! Os dados foram atualizados.']);
         }
       } catch (e) {
@@ -368,9 +318,9 @@
       document.getElementById('progressContainer').style.display = 'none';
     }
 
-    // Liga o botão novo à função
+    // Liga os botões
+    document.getElementById('buscarBtn').addEventListener('click', buscarNoBanco);
     document.getElementById('syncBtn').addEventListener('click', iniciarVarredura);
-    // Faz a pesquisa rodar sozinha assim que você abre o site
     window.addEventListener('DOMContentLoaded', buscarNoBanco);
   </script>
 </body>
