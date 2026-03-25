@@ -22,43 +22,62 @@ body{margin:0;background:var(--bg);font-family:Arial,sans-serif;color:var(--text
 .grid{display:grid;gap:16px}
 .grid.four{grid-template-columns:repeat(4,minmax(0,1fr))}
 label span{display:block;font-size:14px;color:#334155;margin-bottom:8px}
-input{width:100%;padding:16px 14px;border-radius:14px;border:1px solid #cfd8e3;font-size:18px;outline:none}
-input:focus{border-color:#516b93;box-shadow:0 0 0 3px rgba(81,107,147,.12)}
-.controls-row,.actions{display:flex;gap:18px;align-items:center;flex-wrap:wrap;margin-top:18px}
-.toggle{display:flex;align-items:center;gap:10px;font-size:16px}
-button,.link-btn{border:0;border-radius:14px;background:var(--primary);color:#fff;padding:14px 18px;font-size:16px;text-decoration:none;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
-button.secondary,.secondary-link{background:#5b6779}
-.hint,.muted{color:var(--muted)}
-.summary-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:18px}
-.summary-grid .label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px}
-.summary-grid strong{font-size:24px}
-.messages{display:grid;gap:8px;margin-top:16px}
-.message{background:#f7f8fa;border:1px solid var(--border);padding:12px 14px;border-radius:12px;color:#334155}
-.section-title{display:flex;justify-content:space-between;gap:16px;align-items:end;margin-bottom:18px}
-.section-title h2{margin:0;font-size:38px}
-.section-title p{margin:0;color:var(--muted)}
-.listing-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}
-.listing-card{border:1px solid var(--border);border-radius:18px;padding:18px;background:#fff}
-.top-row{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
-.top-row h3{margin:0 0 6px;font-size:24px}
-.price{font-size:34px;font-weight:700;margin:18px 0}
-.meta-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:10px}
-.meta-label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px}
-.dealer-line{font-size:15px;color:var(--muted);margin:10px 0 14px}
-.pill-group,.badges,.card-actions{display:flex;gap:8px;flex-wrap:wrap}
-.pill,.tag{background:#edf1f6;color:#20334d;border-radius:999px;padding:7px 10px;font-size:12px;font-weight:700}
-.pill.new{background:#dff6e9;color:var(--ok)}
-.tag{font-weight:600}
-.card-actions{margin-top:14px}
-.dealers{display:grid;gap:12px}
-.dealer-row{display:grid;grid-template-columns:2.4fr 1fr 1fr .9fr;gap:16px;padding:14px 0;border-bottom:1px solid #eceff4;align-items:center}
-.dealer-row a{color:var(--primary);font-weight:700;text-decoration:none}
-.empty{color:var(--muted);font-size:18px}
-.small{font-size:14px}
-@media (max-width: 1100px){
-  .grid.four,.summary-grid,.listing-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .hero{flex-direction:column}
-  .hero-side{min-width:100%;grid-template-columns:repeat(2,minmax(0,1fr))}
+/* Arrumando as caixas de texto para não estragar os checkboxes */
+input:not([type="checkbox"]) {
+  width: 100%;
+  padding: 16px 14px;
+  border-radius: 14px;
+  border: 1px solid #cfd8e3;
+  font-size: 18px;
+  outline: none;
+}
+input:not([type="checkbox"]):focus {
+  border-color: #516b93;
+  box-shadow: 0 0 0 3px rgba(81,107,147,.12);
+}
+
+/* Deixando os checkboxes bonitos e alinhados */
+.checkbox-group {
+  display: flex;
+  gap: 32px;
+  margin-top: 20px;
+}
+.checkbox-group label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 16px;
+  cursor: pointer;
+  color: #12284a;
+}
+input[type="checkbox"] {
+  width: 22px;
+  height: 22px;
+  cursor: pointer;
+  accent-color: var(--primary);
+  margin: 0;
+}
+
+/* Barra de progresso animada */
+.progress-container {
+  width: 100%;
+  background-color: #e2e8f0;
+  border-radius: 8px;
+  overflow: hidden;
+  margin-top: 24px;
+  display: none; /* Escondido por padrão */
+}
+.progress-bar {
+  height: 10px;
+  background-color: #0f6b42;
+  width: 20%;
+  border-radius: 8px;
+  animation: loadingBar 2s infinite ease-in-out;
+}
+@keyframes loadingBar {
+  0% { transform: translateX(-100%); width: 20%; }
+  50% { width: 60%; }
+  100% { transform: translateX(500%); width: 20%; }
 }
 @media (max-width: 720px){
   .page{padding:16px}
