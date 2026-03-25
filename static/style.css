@@ -67,3 +67,63 @@ button.secondary,.secondary-link{background:#5b6779}
   .dealer-row{grid-template-columns:1fr}
   .section-title{display:block}
 }
+/* Melhorias visuais para o buscador */
+
+/* O botão principal de busca ganha destaque */
+#buscarBtn {
+  background: #0f6b42; /* Verde Jeep */
+  font-size: 18px;
+  font-weight: bold;
+  padding: 16px 32px;
+  box-shadow: 0 4px 12px rgba(15, 107, 66, 0.3);
+  transition: all 0.2s ease;
+  width: 100%;
+}
+#buscarBtn:hover {
+  background: #0b5031;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(15, 107, 66, 0.4);
+}
+#buscarBtn:disabled {
+  background: #5b6779;
+  transform: none;
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+/* Deixando o Card de cada carro mais bonito */
+.listing-card {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  display: flex;
+  flex-direction: column;
+}
+.listing-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 28px rgba(16, 24, 40, 0.12);
+  border-color: #516b93;
+}
+
+.price {
+  color: #0f6b42; /* Preço em destaque */
+}
+
+/* Joga os botões de ação (Abrir anúncio/loja) sempre pro final do card */
+.card-actions {
+  margin-top: auto;
+  padding-top: 16px;
+  border-top: 1px solid #eceff4;
+}
+
+/* Botões do card mais modernos */
+.link-btn {
+  flex: 1;
+  font-weight: 600;
+  text-align: center;
+}
+.link-btn.secondary-link {
+  background: #edf1f6;
+  color: #12284a;
+}
+.link-btn.secondary-link:hover {
+  background: #dde3ea;
+}
