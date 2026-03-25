@@ -236,6 +236,10 @@ def extract_years(value: str) -> list[int]:
             unique.append(year)
     return unique
 
+def extract_color(text: str) -> str:
+    # Procura as cores mais comuns no texto do anúncio
+    match = re.search(r'\b(branco|preto|prata|cinza|vermelho|azul|verde|marrom|bege|bordo)\b', text, re.IGNORECASE)
+    return match.group(1).capitalize() if match else 'N/I'
 
 def extract_km(value: str) -> str:
     match = re.search(r"(\d{1,3}(?:[\.\s]\d{3})+|\d{1,6})\s?km", value or "", re.I)
