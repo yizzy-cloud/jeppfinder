@@ -865,15 +865,22 @@ def api_listings():
 
 
 @app.get("/api/health")
-def api_health():
+@app.post('/api/scan-secret')
+def api_scan_secret():
+    token = request.headers.get('X-Scan-Token', '')
+    if not SCAN_TOKEN or token != SCAN_TOKEN:
+        return jsonify({'error': 'unauthorized'}), 401
+    
+    filters = normalize_filters(request.get_json(silent=True))
+    
+    # Roda a busca pesada, salva tudo no banco, mas guarda o resultado numa variável
+    resultado = run_scan(filters)
+    
+    # Devolve apenas um resuminho leve para não engasgar o cron-job
     return jsonify({
-        "status": "ok",
-        "time": now_iso(),
-        "db_path": str(DB_PATH),
-        "active_dealers": [d["name"] for d in ACTIVE_DEALERS],
-        "use_test_dealers": USE_TEST_DEALERS,
+        'status': 'sucesso',
+        'mensagem': 'Busca concluida e salva no banco.',
+        'total_bruto': resultado['total_raw'],
+        'total_filtrado': resultado['total_filtered']
     })
-
-
-if __name__ == "__main__":
     app.run(host="0.0.0.0", port=PORT)
