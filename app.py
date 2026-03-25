@@ -4,6 +4,7 @@ import os
 import re
 import sqlite3
 import traceback
+import threading
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -816,15 +817,23 @@ def api_scan_secret():
     
     filters = normalize_filters(request.get_json(silent=True))
     
-    # Roda a busca pesada, salva tudo no banco, mas guarda o resultado numa variável
-    resultado = run_scan(filters)
+    # Criamos uma função interna que faz o trabalho pesado silenciosamente
+    def trabalho_pesado(filtros):
+        try:
+            print("Iniciando varredura em segundo plano...")
+            run_scan(filtros)
+            print("Varredura concluida e salva no banco de dados!")
+        except Exception as e:
+            print(f"Erro na varredura: {e}")
+
+    # Disparamos a função em uma Thread (segundo plano) e deixamos ela rodando solta
+    thread = threading.Thread(target=trabalho_pesado, args=(filters,))
+    thread.start()
     
-    # Devolve apenas um resuminho leve para não engasgar o cron-job
+    # Devolvemos a resposta pro cron-job IMEDIATAMENTE, em menos de 1 segundo!
     return jsonify({
         'status': 'sucesso',
-        'mensagem': 'Busca concluida e salva no banco.',
-        'total_bruto': resultado['total_raw'],
-        'total_filtrado': resultado['total_filtered']
+        'mensagem': 'A busca foi iniciada em segundo plano. O banco será populado nos próximos minutos.'
     })
 
 
