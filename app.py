@@ -526,14 +526,24 @@ def pick_anchor_context(anchor) -> str:
 
 
 def fetch_detail_page(detail_url: str) -> dict[str, str]:
-    try:
-        response = requests.get(
-            detail_url,
-            headers=HEADERS,
-            timeout=(5, 8),
-            stream=True,
-            allow_redirects=True,
-        )
+    response = safe_request(detail_url)
+    if not response:
+        return {}
+    html = response.text
+    soup = BeautifulSoup(html, 'html.parser')
+    full_text = normalize_spaces(soup.get_text(' ', strip=True))
+    title = normalize_spaces((soup.title.string if soup.title and soup.title.string else ''))
+    price_match = re.search(r'R\$\s?[\d\.,]+', full_text, re.I)
+    price_label = normalize_spaces(price_match.group(0)) if price_match else ''
+    return {
+        'title': title,
+        'full_text': full_text,
+        'price_label': price_label,
+        'km': extract_km(full_text),
+        'version': infer_version(full_text),
+        'year': '/'.join(str(y) for y in extract_years(full_text)[:2]) or 'N/I',
+        'color': extract_color(full_text), # <-- AQUI ESTÁ A COR
+    }
         response.raise_for_status()
 
         content_type = (response.headers.get("Content-Type") or "").lower()
