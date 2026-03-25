@@ -678,7 +678,15 @@ def fetch_html_fallback(dealer: dict[str, Any]) -> list[Listing]:
                 price=price,
                 price_label=format_price(price),
                 km=km,
-                color="N/I",
+                color = detail.get('color') or extract_color(merged) # Atualize esta linha
+        notes = normalize_spaces(merged[:500])
+        results.append(Listing(
+            dealer=dealer['name'], dealer_url=dealer['url'], city=dealer['city'], platform=dealer['platform'],
+            model='Jeep Renegade', version=detail.get('version') or version, year=detail.get('year') or year_label,
+            price=price, price_label=format_price(price), km=detail.get('km') or km, 
+            color=color, # <-- Agora passa a cor detectada em vez de 'N/I'
+            url=full_url, source='html-fallback', notes=notes,
+        ))
                 url=full_url,
                 source="html-fallback",
                 notes=notes,
