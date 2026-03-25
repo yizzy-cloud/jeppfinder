@@ -29,31 +29,35 @@
     <section class="card filters">
       <div class="grid four">
         <label>
-          <span>Preço mínimo</span>
+          <span>Preço mínimo (R$)</span>
           <input id="min_price" type="number" value="{{ default_filters.min_price }}">
         </label>
         <label>
-          <span>Preço máximo</span>
+          <span>Preço máximo (R$)</span>
           <input id="max_price" type="number" value="{{ default_filters.max_price }}">
         </label>
         <label>
-          <span>Anos</span>
+          <span>Anos (separados por vírgula)</span>
           <input id="years" type="text" value="{{ default_filters.years | join(',') }}">
         </label>
         <label>
-          <span>Versão</span>
+          <span>Versão (palavras-chave)</span>
           <input id="version_keywords" type="text" value="{{ default_filters.version_keywords | join(', ') }}">
         </label>
       </div>
-      <div class="controls-row">
-        <label class="toggle"><input id="only_new" type="checkbox"> Apenas novos</label>
-        <label class="toggle"><input id="strict_keywords" type="checkbox"> Exigir todas as palavras da versão</label>
+      
+      <div class="controls-row" style="margin-top: 24px; display: flex; align-items: center; gap: 24px;">
+        <label class="toggle" style="cursor: pointer;">
+          <input id="only_new" type="checkbox"> Apenas anúncios novos
+        </label>
+        <label class="toggle" style="cursor: pointer;">
+          <input id="strict_keywords" type="checkbox"> Exigir todas as palavras da versão
+        </label>
       </div>
-      <div class="actions">
-        <button id="scanBtn" style="display: none;">Buscar anúncios</button>
-        <button id="historyBtn" class="secondary">Atualizar Tela</button>
+      
+      <div class="actions" style="margin-top: 24px; border-top: 1px solid #dde3ea; padding-top: 20px;">
+        <button id="buscarBtn">Pesquisar no Banco de Dados</button>
       </div>
-      <p class="hint">Quando o filtro estrito zerar os resultados, o sistema ainda mostra candidatos próximos com o link real do anúncio.</p>
     </section>
 
     <section class="card summary" id="summary" hidden>
@@ -222,59 +226,79 @@
       }
     }
 
-    async function loadHistory() {
-      const btn = document.getElementById('historyBtn');
+   async function buscarNoBanco() {
+      const btn = document.getElementById('buscarBtn');
       const textoOriginal = btn.textContent;
       
-      // Muda o texto e desativa o botão para dar o "efeito visual" de que está trabalhando
       btn.disabled = true;
-      btn.textContent = 'Atualizando...';
+      btn.textContent = 'Filtrando resultados...';
       
       try {
+        // Pega os filtros que você digitou na tela
+        const payload = payloadFromForm();
+        
+        // Puxa todos os carros que o robô já salvou no banco
         const resp = await fetch('/api/listings');
         const data = await resp.json();
         
+        if (!resp.ok) throw new Error('Falha ao acessar o banco local');
+
+        // Filtra a lista de carros usando as regras da sua tela
+        const carrosFiltrados = data.results.filter(carro => {
+          const preco = parseFloat(carro.price) || 0;
+          const anosSelecionados = payload.years;
+          const anoCarro = parseInt((carro.year || '').split('/')[0]) || 0;
+          const textoBusca = `${carro.model} ${carro.version} ${carro.notes}`.toLowerCase();
+
+          // Filtro de Preço
+          if (preco > 0 && payload.min_price > 0 && preco < payload.min_price) return false;
+          if (preco > 0 && payload.max_price > 0 && preco > payload.max_price) return false;
+
+          // Filtro de Ano
+          if (anosSelecionados.length > 0 && anoCarro > 0 && !anosSelecionados.includes(anoCarro)) return false;
+
+          // Filtro de Versão/Palavras-chave
+          if (payload.version_keywords.length > 0) {
+            if (payload.strict_keywords) {
+              const temTodas = payload.version_keywords.every(kw => textoBusca.includes(kw));
+              if (!temTodas) return false;
+            } else {
+              const temAlguma = payload.version_keywords.some(kw => textoBusca.includes(kw));
+              if (!temAlguma) return false;
+            }
+          }
+
+          // Filtro de Novo
+          if (payload.only_new && !carro.is_new) return false;
+
+          return true; // Se passou em todos os testes, mostra o carro!
+        });
+
+        // Mostra na tela
         document.getElementById('summary').hidden = false;
         document.getElementById('resultsCard').hidden = false;
-        document.getElementById('candidatesCard').hidden = true;
-        document.getElementById('dealersCard').hidden = true;
         
-        document.getElementById('executed_at').textContent = 'Histórico salvo';
+        document.getElementById('executed_at').textContent = 'Agora (Filtro Rápido)';
         document.getElementById('total_raw').textContent = data.total || 0;
-        document.getElementById('total_filtered').textContent = data.total || 0;
-        document.getElementById('total_candidates').textContent = 0;
+        document.getElementById('total_filtered').textContent = carrosFiltrados.length;
+        document.getElementById('total_candidates').textContent = '-'; // Desativado no modo rápido
         
-        renderMessages(['Histórico atualizado com sucesso do banco local.']);
-        renderList('results', data.results || [], 'Ainda não há anúncios salvos. O robô precisa rodar primeiro!');
+        renderMessages(['Busca aplicada aos dados salvos pelo seu robô.']);
+        renderList('results', carrosFiltrados, 'Nenhum carro encontrado com esses filtros exatos.');
+        
       } catch (err) {
-        alert('Erro ao atualizar a tela: ' + err.message);
+        alert('Erro ao filtrar: ' + err.message);
       } finally {
-        // Devolve o botão ao estado normal
         btn.disabled = false;
         btn.textContent = textoOriginal;
       }
-        }
-
-        document.getElementById('summary').hidden = false;
-        document.getElementById('resultsCard').hidden = false;
-        document.getElementById('candidatesCard').hidden = true;
-        document.getElementById('dealersCard').hidden = true;
-        document.getElementById('executed_at').textContent = 'Histórico salvo';
-        document.getElementById('total_raw').textContent = data.total || 0;
-        document.getElementById('total_filtered').textContent = data.total || 0;
-        document.getElementById('total_candidates').textContent = 0;
-        renderMessages(['Histórico consolidado do banco local.']);
-        renderList('results', data.results || [], 'Ainda não há anúncios salvos.');
-      } catch (err) {
-        console.error(err);
-        alert(err.message || 'Erro ao carregar histórico.');
-      }
     }
 
-    document.getElementById('scanBtn').addEventListener('click', runScan);
-    document.getElementById('historyBtn').addEventListener('click', loadHistory);
- // Faz a página carregar o histórico automaticamente assim que for aberta
-    window.addEventListener('DOMContentLoaded', loadHistory);
+    // Faz o botão funcionar ao clicar
+    document.getElementById('buscarBtn').addEventListener('click', buscarNoBanco);
+    
+    // Faz a pesquisa rodar sozinha assim que você abre o site
+    window.addEventListener('DOMContentLoaded', buscarNoBanco);
   </script>
 </body>
 </html>
