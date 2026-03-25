@@ -106,6 +106,7 @@
         version_keywords: (document.getElementById('version_keywords').value || '').split(',').map(x => x.trim()).filter(Boolean),
         only_new: document.getElementById('only_new').checked,
         strict_keywords: document.getElementById('strict_keywords').checked,
+        color_filter: (document.getElementById('color_filter').value || '').toLowerCase().trim() // <-- NOVA LINHA
       }
     }
 
