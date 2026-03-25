@@ -821,50 +821,12 @@ def api_scan():
         }), 500
 
 
-@app.post("/api/scan-secret")
-def api_scan_secret():
-    try:
-        token = request.headers.get("X-Scan-Token", "")
-        if not SCAN_TOKEN or token != SCAN_TOKEN:
-            return jsonify({"error": "unauthorized"}), 401
+@app.post('/api/scan')
+def api_scan():
+    filters = normalize_filters(request.get_json(silent=True))
+    return jsonify(run_scan(filters))
 
-        filters = normalize_filters(request.get_json(silent=True))
-        result = run_scan(filters)
-        return jsonify(result), 200
-    except Exception as e:
-        traceback.print_exc()
-        return jsonify({
-            "error": f"Erro interno em /api/scan-secret: {str(e)}",
-            "trace_hint": "Verifique os logs do Render para o traceback completo."
-        }), 500
-
-
-@app.get("/api/listings")
-def api_listings():
-    try:
-        only_new = request.args.get("only_new", "false").lower() == "true"
-        conn = get_db()
-        rows = conn.execute(
-            "SELECT * FROM listings ORDER BY last_seen_at DESC, relevance_score DESC, price ASC"
-        ).fetchall()
-        conn.close()
-
-        items = [row_to_listing(row) for row in rows]
-        if only_new:
-            items = [item for item in items if item["is_new"]]
-
-        return jsonify({
-            "total": len(items),
-            "results": items,
-        }), 200
-    except Exception as e:
-        traceback.print_exc()
-        return jsonify({
-            "error": f"Erro interno em /api/listings: {str(e)}"
-        }), 500
-
-
-@app.get("/api/health")
+# DEIXE APENAS ESTE BLOCO ABAIXO, NÃO PODE TER DOIS IGUAIS A ELE:
 @app.post('/api/scan-secret')
 def api_scan_secret():
     token = request.headers.get('X-Scan-Token', '')
@@ -883,4 +845,7 @@ def api_scan_secret():
         'total_bruto': resultado['total_raw'],
         'total_filtrado': resultado['total_filtered']
     })
-    app.run(host="0.0.0.0", port=PORT)
+
+@app.get('/api/listings')
+def api_listings():
+    # ... resto do código ...
