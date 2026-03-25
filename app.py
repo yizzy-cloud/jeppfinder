@@ -594,12 +594,33 @@ def fetch_html_fallback(dealer: dict[str, Any]) -> list[Listing]:
     results: list[Listing] = []
     seen_urls: set[str] = set()
 
-    anchors = soup.select("a[href]")
-    inspected = 0
-    max_candidates = 25
-    max_detail_fetches = 8
-    detail_fetches = 0
-
+    for anchor in soup.select('a[href]'):
+        href = normalize_spaces(anchor.get('href') or '')
+        
+        # Ignora links inúteis, vazios ou que apontam pra própria tela
+        if not href or href in ('/', '#') or href.startswith('javascript:') or href.startswith('mailto:'):
+            continue
+            
+        full_url = absolute_url(dealer['url'], href)
+        
+        # Filtro rígido contra página inicial: Se o link for exatamente a URL da loja, pula!
+        if full_url == dealer['url'] or full_url.rstrip('/') == dealer['url'].rstrip('/'):
+            continue
+        # Se for só a página geral de seminovos, pula!
+        if full_url.endswith('/seminovos') or full_url.endswith('/seminovos/'):
+            continue
+            
+        if full_url in seen_urls:
+            continue
+            
+        context = pick_anchor_context(anchor)
+        combined = f'{href} {context}'.lower()
+        
+        # O link OU o botão precisam citar renegade
+        if 'renegade' not in combined:
+            continue
+            
+        seen_urls.add(full_url)
     for anchor in anchors:
         if inspected >= max_candidates:
             break
