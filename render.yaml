@@ -6,6 +6,10 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn app:app
     healthCheckPath: /api/health
+    disk:
+      name: sqlite-data
+      mountPath: /data
+      sizeGB: 1
     envVars:
       - key: SECRET_KEY
         sync: false
@@ -14,6 +18,6 @@ services:
       - key: AUTOFORCE_TOKEN
         sync: false
       - key: DB_PATH
-        value: /tmp/renegade_finder.db
+        value: /data/renegade_finder.db
       - key: NEW_WINDOW_HOURS
         value: 72
